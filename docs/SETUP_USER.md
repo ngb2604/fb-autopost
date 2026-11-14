@@ -118,15 +118,45 @@ Cách nhanh nhất (dùng Graph API Explorer):
 
 ## 4. Telegram (nhận thông báo)
 
-1. Mở Telegram → tìm **@BotFather** → **Start**.
-2. Gõ `/newbot` → đặt tên (ví dụ `Shop Auto Post`) → đặt username kết thúc bằng `bot` (ví dụ `shop_autopost_bot`).
-3. BotFather trả về token dạng `123456789:AAH...` → ghi là `TELEGRAM_BOT_TOKEN`.
-4. Bấm vào bot vừa tạo → **Start** → gửi thử `hello`.
-5. Lấy `TELEGRAM_CHAT_ID`: mở trên trình duyệt
-   `https://api.telegram.org/bot<TOKEN>/getUpdates`
-6. Trong JSON, tìm `"chat":{"id":123456789` → số đó là `TELEGRAM_CHAT_ID`.
+Mất khoảng 3 phút. Làm trên **điện thoại** (Telegram app) hoặc Telegram Desktop đều được.
 
-> Nếu `getUpdates` trả `{"ok":true,"result":[]}`: hãy nhắn cho bot một tin nữa rồi tải lại trang.
+### 4.1 Tạo bot với BotFather
+1. Mở app Telegram → bấm ô **Tìm kiếm** (kính lúp) → gõ `BotFather`.
+2. Chọn tài khoản **@BotFather** (có **dấu tick xanh**, tên hiển thị "BotFather").
+3. Bấm nút **START** ở dưới cùng.
+4. Bấm ô nhập tin nhắn, gõ chính xác: `/newbot` rồi gửi.
+5. BotFather hỏi **"Alright, a new bot. How are we going to call it?"** → gõ tên hiển thị bất kỳ, ví dụ:
+   `Ngoc Son Auto Post` → gửi.
+6. BotFather hỏi tiếp **username** → gõ một username **chưa ai dùng** và **phải kết thúc bằng chữ `bot`**, ví dụ:
+   `ngocson_post_bot` → gửi.
+   - Nếu bị báo "Sorry, this username is already taken" → đổi tên khác, ví dụ `ngocson_post2026_bot`.
+7. BotFather trả lời **"Done! Congratulations on your new bot..."** và có dòng:
+   ```
+   Use this token to access the HTTP API:
+   8123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   ```
+   → **Bấm giữ vào token để Copy** (token dài, có dấu `:` ở giữa). Đây là `TELEGRAM_BOT_TOKEN`.
+
+### 4.2 Bật bot và gửi tin thử
+8. Ngay trong tin nhắn của BotFather có link **`t.me/ngocson_post_bot`** → bấm vào → mở khung chat với bot của bạn → bấm **START** → gõ `hi` → gửi.
+   (Bắt buộc: nếu chưa bấm START, bot **không** gửi được tin cho bạn.)
+
+### 4.3 Lấy `TELEGRAM_CHAT_ID`
+9. Mở trình duyệt trên máy tính, dán địa chỉ sau (thay `<TOKEN>` bằng token ở bước 7):
+   `https://api.telegram.org/bot<TOKEN>/getUpdates`
+10. Trong trang JSON hiện ra, tìm đoạn `"chat":{"id":` → con số ngay sau đó (ví dụ `"id":7351234567`) chính là
+    `TELEGRAM_CHAT_ID`. **Chỉ copy phần số** (không copy dấu ngoặc kép).
+
+> Nếu trang trả về `{"ok":true,"result":[]}` (rỗng): quay lại Telegram nhắn cho bot thêm 1 tin nữa (ví dụ `test`),
+> đợi 5 giây rồi tải lại trang. Nếu vẫn rỗng, gõ `/start` cho bot rồi thử lại.
+
+> Nếu không muốn làm bước 9–10: chỉ cần gửi token cho trợ lý, phần chat_id sẽ được lấy tự động.
+> Chat ID của bạn là thông tin **không bí mật** (chỉ dùng để gửi tin cho chính bạn).
+
+### 4.4 Nạp vào GitHub
+11. Vào repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
+    - Name: `TELEGRAM_BOT_TOKEN` — Secret: token ở bước 7.
+    - Name: `TELEGRAM_CHAT_ID` — Secret: con số ở bước 10.
 
 ---
 
