@@ -1,0 +1,21 @@
+# Secret — không bao giờ commit
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Hệ điều hành / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Cấu hình PWA thật (chỉ chứa anon key nhưng vẫn nên tách khỏi repo)
+# Nếu deploy GitHub Pages cần file này trong repo, bỏ 2 dòng dưới.
+# web/config.js

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<title>Auto Post — Facebook Page</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<meta name="theme-color" content="#111827" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Auto Post" />
+<meta name="format-detection" content="telephone=no" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ================= Đăng nhập ================= -->
+<section id="login-view" class="login-view" hidden>
+  <div class="login-card">
+    <div class="brand">
+      <img src="icons/icon-192.png" alt="" width="56" height="56" />
+      <h1>Auto Post</h1>
+      <p class="muted">Đăng bài tự động lên Facebook Page</p>
+    </div>
+    <form id="login-form" class="stack">
+      <label>
+        Email
+        <input type="email" id="login-email" autocomplete="username" inputmode="email" required />
+      </label>
+      <label>
+        Mật khẩu
+        <input type="password" id="login-password" autocomplete="current-password" required />
+      </label>
+      <button type="submit" class="btn primary big" id="login-btn">Đăng nhập</button>
+      <p id="login-error" class="error" role="alert" hidden></p>
+    </form>
+    <p class="hint">Tài khoản do bạn tạo trong Supabase. Đăng ký công khai đã bị tắt.</p>
+  </div>
+</section>
+
+<!-- ================= Ứng dụng ================= -->
+<div id="app-view" hidden>
+  <header class="app-header">
+    <h2 id="view-title">Kho ảnh</h2>
+    <button id="logout-btn" class="btn ghost small" type="button">Đăng xuất</button>
+  </header>
+
+  <main id="main">
+    <!-- ---------- Kho ảnh ---------- -->
+    <section id="tab-library" class="tab">
+      <div class="toolbar">
+        <button id="add-photos-btn" class="btn primary" type="button">＋ Thêm ảnh</button>
+        <input id="file-input" type="file" accept="image/*" multiple hidden />
+        <span id="upload-status" class="muted small"></span>
+      </div>
+      <div id="upload-progress" class="progress" hidden><div class="bar"></div></div>
+      <div class="chips" id="status-filters"></div>
+      <div id="photo-grid" class="grid"></div>
+      <p id="library-empty" class="empty" hidden>Chưa có ảnh nào. Bấm “Thêm ảnh” để bắt đầu.</p>
+    </section>
+
+    <!-- ---------- Hàng đợi ---------- -->
+    <section id="tab-queue" class="tab" hidden>
+      <div class="toolbar">
+        <button id="approve-all-btn" class="btn" type="button">Duyệt tất cả</button>
+        <span class="muted small" id="queue-count"></span>
+      </div>
+      <div id="queue-list" class="list"></div>
+      <p id="queue-empty" class="empty" hidden>Không có bài nào chờ xử lý.</p>
+    </section>
+
+    <!-- ---------- Cài đặt ---------- -->
+    <section id="tab-settings" class="tab" hidden>
+      <form id="settings-form" class="stack card">
+        <label>
+          Số bài mỗi ngày: <output id="ppd-out">3</output>
+          <input type="range" id="posts_per_day" min="1" max="10" step="1" value="3" />
+        </label>
+
+        <label>
+          Khung giờ đăng (giờ Việt Nam)
+          <input type="text" id="time_windows" placeholder="09:00, 12:00, 20:00" />
+          <span class="hint">Cách nhau bằng dấu phẩy. Thiếu thì app tự chia đều.</span>
+        </label>
+
+        <label>
+          Lệch ngẫu nhiên (± phút)
+          <input type="number" id="jitter_minutes" min="0" max="60" step="1" value="10" inputmode="numeric" />
+        </label>
+
+        <label>
+          Giọng văn
+          <input type="text" id="tone" placeholder="thân thiện, tự nhiên, ngắn gọn" />
+        </label>
+
+        <label>
+          Thông tin shop (tên, địa chỉ, SĐT, chính sách…)
+          <textarea id="shop_info" rows="4" placeholder="Shop Hoa Tươi ABC — 12 Lê Lợi, Q.1 — 0912 345 678&#10;Giao trong 2h nội thành, đổi trả trong 24h."></textarea>
+        </label>
+
+        <label>
+          Bài mẫu (mỗi bài cách nhau bằng dòng trống)
+          <textarea id="sample_posts" rows="5" placeholder="Dán 2–3 bài đăng cũ bạn thích…"></textarea>
+        </label>
+
+        <label>
+          Hashtag mặc định
+          <input type="text" id="default_hashtags" placeholder="#shopabc, #quatang" />
+        </label>
+
+        <label class="switch">
+          <span>Bắt buộc duyệt tay trước khi đăng</span>
+          <input type="checkbox" id="require_approval" />
+        </label>
+
+        <label class="switch">
+          <span>Tạm dừng toàn bộ</span>
+          <input type="checkbox" id="paused" />
+        </label>
+
+        <label>
+          Giữ ảnh trong kho sau khi đăng (ngày)
+          <input type="number" id="retention_days" min="0" max="365" step="1" value="7" inputmode="numeric" />
+        </label>
+
+        <button type="submit" class="btn primary big">Lưu cài đặt</button>
+        <p id="settings-status" class="ok" hidden>Đã lưu ✓</p>
+      </form>
+    </section>
+
+    <!-- ---------- Lịch sử ---------- -->
+    <section id="tab-history" class="tab" hidden>
+      <h3 class="section-title">Đã đăng</h3>
+      <div id="history-list" class="list"></div>
+      <h3 class="section-title">Lỗi &amp; nhật ký</h3>
+      <div id="log-list" class="list"></div>
+    </section>
+  </main>
+
+  <nav class="tabbar" id="tabbar">
+    <button data-tab="library" class="active"><span class="ico">🖼️</span>Kho ảnh</button>
+    <button data-tab="queue"><span class="ico">🗓️</span>Hàng đợi</button>
+    <button data-tab="settings"><span class="ico">⚙️</span>Cài đặt</button>
+    <button data-tab="history"><span class="ico">📜</span>Lịch sử</button>
+  </nav>
+</div>
+
+<!-- ================= Modal sửa bài ================= -->
+<dialog id="edit-dialog" class="sheet">
+  <form method="dialog" id="edit-form" class="stack">
+    <h3>Sửa bài đăng</h3>
+    <img id="edit-thumb" alt="" class="edit-thumb" />
+    <label>
+      Caption
+      <textarea id="edit-caption" rows="6"></textarea>
+    </label>
+    <label>
+      Hashtag
+      <input type="text" id="edit-hashtags" placeholder="#tag1 #tag2" />
+    </label>
+    <label id="edit-time-wrap">
+      Giờ đăng
+      <input type="datetime-local" id="edit-time" />
+    </label>
+    <p id="edit-warning" class="warn" hidden></p>
+    <div class="row">
+      <button type="button" class="btn ghost" id="edit-cancel">Đóng</button>
+      <button type="button" class="btn primary" id="edit-save">Lưu</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
