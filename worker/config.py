@@ -33,7 +33,10 @@ DEFAULT_FB_VERSION = "v26.0"
 
 # Gemini: model Flash ổn định, còn thuộc gói miễn phí tại thời điểm viết code
 # (xem https://ai.google.dev/gemini-api/docs/pricing).
-DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+# 3.8-flash thường bị 503 "high demand" nên mặc định dùng 3.6-flash,
+# tự chuyển sang các model dự phòng khi cần.
+DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
+DEFAULT_GEMINI_FALLBACKS = "gemini-3.5-flash-lite,gemini-3.8-flash"
 
 
 @dataclass
@@ -42,6 +45,7 @@ class Config:
     supabase_service_key: str
     gemini_api_key: str
     gemini_model: str
+    gemini_fallbacks: list[str]
     fb_page_id: str
     fb_page_token: str
     fb_graph_version: str
@@ -57,6 +61,11 @@ class Config:
             supabase_service_key=_env("SUPABASE_SERVICE_ROLE_KEY"),
             gemini_api_key=_env("GEMINI_API_KEY"),
             gemini_model=_env("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
+            gemini_fallbacks=[
+                m.strip()
+                for m in _env("GEMINI_MODEL_FALLBACKS", DEFAULT_GEMINI_FALLBACKS).split(",")
+                if m.strip()
+            ],
             fb_page_id=_env("FB_PAGE_ID"),
             fb_page_token=_env("FB_PAGE_ACCESS_TOKEN"),
             fb_graph_version=_env("FB_GRAPH_VERSION", DEFAULT_FB_VERSION),

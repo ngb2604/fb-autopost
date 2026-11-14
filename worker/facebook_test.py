@@ -11,22 +11,11 @@ Có thể đặt trong file .env (xem .env.example) — script tự nạp.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-
-def load_dotenv(path: Path = Path(".env")) -> None:
-    """Nạp .env đơn giản (không cần thư viện ngoài)."""
-    if not path.exists():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+from .env import load_dotenv
 
 
 def main() -> int:

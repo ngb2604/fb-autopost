@@ -47,6 +47,11 @@ class RateLimited(Exception):
     """Gemini trả 429 — nên chờ và thử lại sau."""
 
 
+class ModelUnavailable(Exception):
+    """Model đang quá tải (503) hoặc không tồn tại (404) — chuyển model khác."""
+
+
+
 # ---------------------------------------------------------------------------
 # Ảnh
 # ---------------------------------------------------------------------------
@@ -216,6 +221,9 @@ def _call_gemini(
 
     if r.status_code == 429:
         raise RateLimited(r.text[:300])
+    if r.status_code in (404, 503):
+        # 404 = model không còn hỗ trợ, 503 = quá tải -> thử model khác
+        raise ModelUnavailable(f"HTTP {r.status_code}: {r.text[:200]}")
     if r.status_code >= 400:
         raise CaptionError(f"HTTP {r.status_code}: {r.text[:400]}")
 
@@ -243,10 +251,15 @@ def generate_caption(
     sample_posts: list[str] | None = None,
     recent_captions: list[str] | None = None,
     default_hashtags: list[str] | None = None,
+    fallback_models: list[str] | None = None,
     max_retries: int = 2,
     retry_wait: float = 8.0,
 ) -> dict[str, Any]:
-    """Trả về dict đã validate. Ném CaptionError / RateLimited."""
+    """Trả về dict đã validate. Ném CaptionError / RateLimited.
+
+    Nếu model chính quá tải (503) hoặc đã bị gỡ (404), tự thử các model trong
+    `fallback_models` — giúp bot không chết khi Google đổi model/quá tải.
+    """
     image_jpeg = prepare_image(image_bytes)
     prompt = build_prompt(
         tone=tone,
@@ -255,17 +268,29 @@ def generate_caption(
         recent_captions=recent_captions,
     )
 
+    chain = [model] + [m for m in (fallback_models or []) if m and m != model]
     last_error: Exception | None = None
-    for attempt in range(max_retries + 1):
-        try:
-            text = _call_gemini(api_key=api_key, model=model, prompt=prompt, image_jpeg=image_jpeg)
-            return parse_caption_json(text, defaults=default_hashtags)
-        except RateLimited:
-            raise
-        except (CaptionError, httpx.HTTPError) as exc:
-            last_error = exc
-            log.warning("Gemini lỗi (lần %d/%d): %s", attempt + 1, max_retries + 1, exc)
-            if attempt < max_retries:
-                time.sleep(retry_wait * (attempt + 1))
 
-    raise CaptionError(f"Thất bại sau {max_retries + 1} lần: {last_error}")
+    for candidate in chain:
+        for attempt in range(max_retries + 1):
+            try:
+                text = _call_gemini(api_key=api_key, model=candidate, prompt=prompt, image_jpeg=image_jpeg)
+                result = parse_caption_json(text, defaults=default_hashtags)
+                if candidate != model:
+                    log.warning("Đã dùng model dự phòng: %s", candidate)
+                return result
+            except RateLimited:
+                raise
+            except ModelUnavailable as exc:
+                # Không tốn thời gian retry: sang model kế tiếp
+                log.warning("Model %s không dùng được (%s) — thử model khác", candidate, exc)
+                last_error = exc
+                break
+            except (CaptionError, httpx.HTTPError) as exc:
+                last_error = exc
+                log.warning("Gemini lỗi (%s, lần %d/%d): %s", candidate, attempt + 1, max_retries + 1, exc)
+                if attempt < max_retries:
+                    time.sleep(retry_wait * (attempt + 1))
+
+    raise CaptionError(f"Thất bại với mọi model ({len(chain)}): {last_error}")
+
