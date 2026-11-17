@@ -1,7 +1,7 @@
 # Auto Post — Bot đăng bài Facebook Page (PWA + Supabase + GitHub Actions)
 
 Tự động viết caption tiếng Việt bằng AI và **lên lịch đăng** ảnh sản phẩm lên Facebook Page.
-Toàn bộ chạy trong **gói miễn phí**: GitHub Pages (PWA) + Supabase (DB/Storage/Auth) +
+Toàn bộ chạy trong **gói miễn phí**: Cloudflare Pages (PWA) + Supabase (DB/Storage/Auth) +
 GitHub Actions (cron) + Gemini API + Facebook Graph API + Telegram.
 
 ```
@@ -32,7 +32,7 @@ iPhone (PWA)  ──upload ảnh đã nén──▶  Supabase (Auth + Postgres +
 ## Cấu trúc
 
 ```
-web/                      PWA (deploy GitHub Pages)
+web/                      PWA (deploy Cloudflare Pages)
   index.html app.js style.css manifest.json sw.js config.js icons/
 worker/                   Worker Python
   main.py caption.py scheduler.py facebook.py db.py notify.py config.py
@@ -40,7 +40,7 @@ worker/                   Worker Python
 supabase/migrations/0001_init.sql
 docs/SETUP_USER.md        Hướng dẫn từng bước cho chủ shop
 scripts/make_icons.py     Tạo icon PWA
-.github/workflows/        worker.yml (cron) + pages.yml (deploy PWA)
+.github/workflows/        worker.yml (cron worker)
 ```
 
 ---
@@ -53,7 +53,8 @@ scripts/make_icons.py     Tạo icon PWA
 3. **Meta**: tạo app Business (Development) → quyền `pages_manage_posts`,
    `pages_read_engagement`, `pages_show_list` → lấy `FB_PAGE_ID` + Page Access Token dài hạn.
 4. **Telegram**: `@BotFather` → `/newbot` → lấy token + chat id.
-5. **GitHub**: tạo repo → dán 7 secret → bật Pages (Source: GitHub Actions).
+5. **GitHub**: tạo repo → dán 7 secret (workflow `worker.yml` chạy cron).
+   **Cloudflare Pages**: Workers & Pages → Create → Pages → Import repo → output `web`, build command để trống.
 6. Sửa `web/config.js`:
    ```js
    window.APP_CONFIG = {
@@ -61,7 +62,7 @@ scripts/make_icons.py     Tạo icon PWA
      SUPABASE_ANON_KEY: "eyJhbGciOi...",
    };
    ```
-7. Mở link Pages bằng Safari trên iPhone → **Thêm vào MH chính** → đăng nhập.
+7. Mở **https://fb-autopost.pages.dev/** bằng Safari trên iPhone → **Thêm vào MH chính** → đăng nhập.
 
 Chi tiết từng bước: **[docs/SETUP_USER.md](docs/SETUP_USER.md)**
 
@@ -103,8 +104,8 @@ git remote add origin https://github.com/<username>/fb-autopost.git
 git push -u origin main
 ```
 
-> Repo **Private** là tốt nhất. GitHub Pages cho repo private cần gói trả phí;
-> nếu dùng gói Free, để repo **Public** — code không chứa secret (tất cả nằm trong GitHub Secrets).
+> Cloudflare Pages miễn phí cho cả repo Private và Public. Repo hiện để **Public** để
+> đơn giản hoá; code không chứa secret (tất cả nằm trong GitHub Secrets / Supabase).
 
 ---
 

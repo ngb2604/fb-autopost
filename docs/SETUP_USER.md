@@ -186,18 +186,25 @@ Tùy chọn — tab **Variables**:
 - `FB_GRAPH_VERSION` = `v26.0`
 - `MAX_PHOTOS_PER_RUN` = `5`
 
-### 5.3 Bật GitHub Pages (cho PWA)
-1. **Settings → Pages** → Source: **GitHub Actions**.
-2. Chạy workflow **Deploy PWA lên GitHub Pages** (tab **Actions** → chọn workflow → **Run workflow**).
-3. Sau khi chạy xong, link app có dạng:
-   `https://<username>.github.io/fb-autopost/`
+### 5.3 Host PWA bằng Cloudflare Pages (miễn phí, đã làm sẵn)
+App đang chạy tại: **https://fb-autopost.pages.dev/**
 
-> Nếu repo để **Private**, GitHub Pages yêu cầu gói trả phí. Khi đó hãy để repo **Public**
-> — code không chứa secret nào nên vẫn an toàn (mọi bí mật nằm trong GitHub Secrets).
+Cấu hình (nếu cần làm lại):
+1. Đăng nhập https://dash.cloudflare.com → **Workers & Pages** → **Create** → **Pages** →
+   **Import an existing Git repository**.
+2. Chọn repo `ngb2604/fb-autopost` → **Begin setup**.
+3. **Framework preset**: `None`; **Build command**: để trống;
+   **Build output directory**: `web`.
+4. **Save and Deploy**. Mỗi lần push lên nhánh `main`, Cloudflare tự build + deploy lại.
+
+> Vì sao không dùng GitHub Pages: tài khoản `ngb2604.github.io` đang gắn tên miền riêng
+> `giasuconnect.me` nên mọi đường dẫn `ngb2604.github.io/fb-autopost/` bị chuyển hướng
+> sang website đang chạy. Cloudflare Pages cho URL riêng, miễn phí, không giới hạn repo public/private.
 
 ### 5.4 Trỏ PWA vào Supabase
 File `web/config.js` phải có URL và anon key của bạn (xem `README.md`).
-Sau khi sửa, commit và push — Pages sẽ tự deploy lại.
+Sau khi sửa, commit và push — Cloudflare Pages sẽ tự deploy lại.
+(Khi sửa CSS/JS, nhớ tăng `?v=` trong `web/index.html` để iPhone không dùng bản cache cũ.)
 
 ### 5.5 Bật cron
 - Workflow `worker.yml` chạy **08:00 sáng mỗi ngày** (giờ Việt Nam).
@@ -209,7 +216,7 @@ Sau khi sửa, commit và push — Pages sẽ tự deploy lại.
 
 ## 6. Cài app lên iPhone
 
-1. Mở link GitHub Pages **bằng Safari** (bắt buộc Safari, không dùng Chrome).
+1. Mở **https://fb-autopost.pages.dev/** **bằng Safari** (bắt buộc Safari, không dùng Chrome).
 2. Bấm nút **Chia sẻ** → **Thêm vào MH chính** (Add to Home Screen).
 3. Mở app từ Màn hình chính → đăng nhập bằng email/mật khẩu đã tạo ở bước 1.3.
 4. Vào tab **Cài đặt** → điền:
