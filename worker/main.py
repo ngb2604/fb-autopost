@@ -394,28 +394,13 @@ def main(argv: list[str] | None = None) -> int:
             log.info("Đang tạm dừng (paused=true) — thoát.")
             return 0
 
-        # Chưa cấu hình Facebook: chưa có gì để đăng thì bỏ qua (không báo lỗi),
-        # chỉ báo lỗi khi trong kho thật sự có ảnh đang chờ.
-        if not cfg.dry_run and not (cfg.fb_page_id and cfg.fb_page_token):
-            waiting = db.select(
-                "photos",
-                {"select": "id", "status": "in.(pending,captioned,approved,scheduled)"},
+        # Chưa cấu hình Facebook thì vẫn viết caption bình thường, chỉ không lên lịch.
+        fb_ready = bool(cfg.fb_page_id and cfg.fb_page_token)
+        if not cfg.dry_run and not fb_ready:
+            log.warning(
+                "Chưa cấu hình Facebook (FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN) — "
+                "vẫn viết caption, nhưng bỏ qua bước lên lịch."
             )
-            if not waiting:
-                log.warning(
-                    "Chưa cấu hình Facebook (FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN) "
-                    "và kho chưa có ảnh — bỏ qua lần chạy này."
-                )
-                return 0
-            message = (
-                f"⚠️ <b>Chưa cấu hình Facebook</b>\n"
-                f"Đang có {len(waiting)} ảnh trong kho nhưng thiếu secret "
-                f"<code>FB_PAGE_ID</code> / <code>FB_PAGE_ACCESS_TOKEN</code>.\n"
-                "Bài sẽ không được lên lịch cho tới khi thêm đủ 2 secret này."
-            )
-            log.error(message.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", ""))
-            notify.send(cfg.telegram_token, cfg.telegram_chat_id, message)
-            return 1
 
         if not cfg.dry_run:
             run_id = database.acquire_run_lock(db)
@@ -435,7 +420,8 @@ def main(argv: list[str] | None = None) -> int:
         if not cfg.dry_run:
             process_pending(db, cfg, settings, stats, notes)
 
-        schedule_approved(db, cfg, settings, stats, dry_run=cfg.dry_run)
+        if cfg.dry_run or fb_ready:
+            schedule_approved(db, cfg, settings, stats, dry_run=cfg.dry_run)
 
         if not cfg.dry_run:
             sync_posted(db, cfg, stats, dry_run=False)
@@ -456,6 +442,12 @@ def main(argv: list[str] | None = None) -> int:
             scheduled_count=len(scheduled_rows),
             timezone_name=settings.get("timezone", "Asia/Ho_Chi_Minh"),
         )
+
+        if not cfg.dry_run and not fb_ready and remaining_rows:
+            notes.append(
+                f"⚠️ {len(remaining_rows)} ảnh đang chờ nhưng chưa có token Facebook "
+                "→ chưa lên lịch được."
+            )
 
         msg = notify.summary_message(
             captioned=stats["captioned"],

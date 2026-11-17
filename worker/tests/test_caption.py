@@ -31,7 +31,7 @@ def test_parse_hop_le():
     r = parse_caption_json(GOOD)
     assert r["product_type"] == "áo thun"
     assert r["confidence"] == pytest.approx(0.86)
-    assert r["hashtags"] == ["#aothun", "#thoitrang", "#ÁO"]
+    assert r["hashtags"] == ["#aothun", "#thoitrang", "#ao"]
 
 
 def test_parse_bo_code_fence():
@@ -63,6 +63,11 @@ def test_hashtag_mac_dinh_duoc_gop_va_gioi_han_6():
     tags = normalize_hashtags(["#a", "b"], defaults=["#c", "#a", "#d", "#e", "#f", "#g"])
     assert len(tags) == 6
     assert tags[0] == "#a"
+
+
+def test_hashtag_bo_dau_tieng_viet():
+    tags = normalize_hashtags(["#ghế văn phòng", "Đồ gỗ cũ", "#thanh-ly"])
+    assert tags == ["#ghevanphong", "#dogocu", "#thanhly"]
 
 
 def test_buoc_duyet_tay_khi_tin_cay_thap():

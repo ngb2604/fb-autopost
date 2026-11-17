@@ -13,7 +13,9 @@ import base64
 import io
 import json
 import logging
+import re
 import time
+import unicodedata
 from typing import Any
 
 import httpx
@@ -113,18 +115,30 @@ def build_prompt(
 # Parse / kiểm tra JSON
 # ---------------------------------------------------------------------------
 
+def _strip_diacritics(text: str) -> str:
+    """Bỏ dấu tiếng Việt: 'ghế' -> 'ghe', 'đồ' -> 'do'."""
+    text = text.replace("đ", "d").replace("Đ", "D")
+    decomposed = unicodedata.normalize("NFD", text)
+    return "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+
+
 def normalize_hashtags(tags: Any, defaults: list[str] | None = None, limit: int = 6) -> list[str]:
+    """Chuẩn hoá hashtag: bỏ dấu, bỏ khoảng trắng/ký tự lạ, thêm '#'.
+
+    Hashtag có dấu (ví dụ '#ghếvănphòng') không hoạt động trên Facebook,
+    nên luôn chuyển về dạng không dấu.
+    """
     out: list[str] = []
     for tag in list(tags or []) + list(defaults or []):
         if not isinstance(tag, str):
             continue
-        t = tag.strip().replace(" ", "")
+        t = _strip_diacritics(tag.strip()).lower()
+        t = re.sub(r"[^0-9a-z_]", "", t)
         if not t:
             continue
-        if not t.startswith("#"):
-            t = "#" + t
-        if t.lower() not in [x.lower() for x in out]:
-            out.append(t)
+        tag_str = "#" + t
+        if tag_str not in out:
+            out.append(tag_str)
     return out[:limit]
 
 
