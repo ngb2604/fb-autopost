@@ -15,6 +15,12 @@
   color-scheme: light dark;
 }
 
+/* Thuộc tính `hidden` phải thắng mọi rule display khác (ví dụ .login-view{display:grid}),
+   nếu không form đăng nhập sẽ nằm đè lên dashboard sau khi đăng nhập. */
+[hidden] {
+  display: none !important;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0b1220;

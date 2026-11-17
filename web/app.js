@@ -19,6 +19,7 @@ const state = {
   signedCache: new Map(),
   editingId: null,
   uploading: false,
+  renderSeq: 0,
 };
 
 const STATUS = {
@@ -394,6 +395,7 @@ function renderFilters() {
 }
 
 async function renderLibrary() {
+  const seq = ++state.renderSeq;
   renderFilters();
   const grid = $("photo-grid");
   const rows = state.photos.filter(
@@ -404,6 +406,9 @@ async function renderLibrary() {
 
   const visible = rows.slice(0, 60);
   const urls = await Promise.all(visible.map((p) => signedUrl(p.storage_path)));
+  // Nếu có lần render mới hơn chen vào trong lúc chờ ảnh, bỏ qua kết quả này
+  // để tránh thẻ ảnh bị nhân đôi.
+  if (seq !== state.renderSeq) return;
 
   visible.forEach((photo, i) => {
     const meta = STATUS[photo.status] || { label: photo.status, cls: "" };
