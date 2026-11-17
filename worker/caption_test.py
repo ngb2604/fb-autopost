@@ -1,10 +1,10 @@
-"""M2 â€” Cháº¡y thá»­ Gemini vá»›i má»™t áº£nh cá»¥c bá»™, in JSON káº¿t quáº£.
+"""M2 — Chạy thử Gemini với một ảnh cục bộ, in JSON kết quả.
 
-CÃ¡ch dÃ¹ng:
+Cách dùng:
     python -m worker.caption_test anh.jpg
-    python -m worker.caption_test anh.jpg --tone "vui váº»" --shop "Shop A, 0912..."
+    python -m worker.caption_test anh.jpg --tone "vui vẻ" --shop "Shop A, 0912..."
 
-Cáº§n GEMINI_API_KEY (Ä‘áº·t trong .env hoáº·c biáº¿n mÃ´i trÆ°á»ng).
+Cần GEMINI_API_KEY (đặt trong .env hoặc biến môi trường).
 """
 
 from __future__ import annotations
@@ -22,9 +22,9 @@ def main() -> int:
     from .caption import CaptionError, RateLimited, generate_caption, needs_manual_review
     from .config import Config
 
-    parser = argparse.ArgumentParser(description="Thá»­ viáº¿t caption báº±ng Gemini")
+    parser = argparse.ArgumentParser(description="Thử viết caption bằng Gemini")
     parser.add_argument("image")
-    parser.add_argument("--tone", default="thÃ¢n thiá»‡n, tá»± nhiÃªn, ngáº¯n gá»n")
+    parser.add_argument("--tone", default="thân thiện, tự nhiên, ngắn gọn")
     parser.add_argument("--shop", default="")
     parser.add_argument("--model", default="")
     args = parser.parse_args()
@@ -47,17 +47,17 @@ def main() -> int:
             default_hashtags=[],
         )
     except RateLimited as exc:
-        print(f"â³ Bá»‹ giá»›i háº¡n tá»‘c Ä‘á»™ (429): {exc}")
+        print(f"⏳ Bị giới hạn tốc độ (429): {exc}")
         return 2
     except CaptionError as exc:
-        print(f"âœ— Lá»—i: {exc}")
+        print(f"✗ Lỗi: {exc}")
         return 1
 
     manual, reason = needs_manual_review(result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     print(f"\nModel: {model}")
-    print(f"Báº¯t buá»™c duyá»‡t tay: {manual} {('(' + reason + ')') if reason else ''}")
-    print("\n--- BÃ i sáº½ Ä‘Äƒng ---")
+    print(f"Bắt buộc duyệt tay: {manual} {('(' + reason + ')') if reason else ''}")
+    print("\n--- Bài sẽ đăng ---")
     print(result["caption"])
     print(" ".join(result["hashtags"]))
     return 0

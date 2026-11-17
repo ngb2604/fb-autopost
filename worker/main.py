@@ -1,16 +1,16 @@
-"""Äiá»ƒm vÃ o cá»§a worker: cháº¡y bá»Ÿi GitHub Actions (cron hoáº·c workflow_dispatch).
+"""Điểm vào của worker: chạy bởi GitHub Actions (cron hoặc workflow_dispatch).
 
-Luá»“ng (má»¥c 7.2 cá»§a Ä‘áº·c táº£):
-1. Äá»c settings; náº¿u paused -> thoÃ¡t.
-2. Xá»­ lÃ½ áº£nh `pending`: Gemini viáº¿t caption -> `captioned` (náº¿u duyá»‡t tay)
-   hoáº·c `approved`.
-3. Xáº¿p lá»‹ch áº£nh `approved`: tÃ­nh khung giá» trá»‘ng -> gá»i Facebook
+Luồng (mục 7.2 của đặc tả):
+1. Đọc settings; nếu paused -> thoát.
+2. Xử lý ảnh `pending`: Gemini viết caption -> `captioned` (nếu duyệt tay)
+   hoặc `approved`.
+3. Xếp lịch ảnh `approved`: tính khung giờ trống -> gọi Facebook
    (`published=false`, `scheduled_publish_time`) -> `scheduled`.
-4. Äá»“ng bá»™: áº£nh `scheduled` Ä‘Ã£ qua giá» -> `posted`.
-5. Dá»n áº£nh cÅ© trong Storage theo `retention_days`.
-6. Gá»­i Telegram tá»•ng káº¿t + cáº£nh bÃ¡o khi sáº¯p háº¿t áº£nh.
+4. Đồng bộ: ảnh `scheduled` đã qua giờ -> `posted`.
+5. Dọn ảnh cũ trong Storage theo `retention_days`.
+6. Gửi Telegram tổng kết + cảnh báo khi sắp hết ảnh.
 
-Cháº¡y thá»­:  python -m worker.main --dry-run
+Chạy thử:  python -m worker.main --dry-run
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def recent_captions(db: database.Supabase, limit: int = 5) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# BÆ°á»›c 2: viáº¿t caption cho áº£nh pending
+# Bước 2: viết caption cho ảnh pending
 # ---------------------------------------------------------------------------
 
 def process_pending(
@@ -70,10 +70,10 @@ def process_pending(
     limit = max(1, cfg.max_photos_per_run)
     photos = database.list_photos(db, ["pending"], limit=limit)
     if not photos:
-        log.info("KhÃ´ng cÃ³ áº£nh pending.")
+        log.info("Không có ảnh pending.")
         return
 
-    log.info("Xá»­ lÃ½ %d áº£nh pending...", len(photos))
+    log.info("Xử lý %d ảnh pending...", len(photos))
     history = recent_captions(db)
     require_approval = bool(settings.get("require_approval", True))
 
@@ -82,8 +82,8 @@ def process_pending(
         try:
             raw = db.download("photos", photo["storage_path"])
         except Exception as exc:
-            database.update_photo(db, pid, status="failed", error_message=f"KhÃ´ng táº£i Ä‘Æ°á»£c áº£nh: {exc}")
-            database.log_event(db, "error", "KhÃ´ng táº£i Ä‘Æ°á»£c áº£nh tá»« Storage", photo_id=pid)
+            database.update_photo(db, pid, status="failed", error_message=f"Không tải được ảnh: {exc}")
+            database.log_event(db, "error", "Không tải được ảnh từ Storage", photo_id=pid)
             stats["failed"] += 1
             continue
 
@@ -100,11 +100,11 @@ def process_pending(
                 default_hashtags=settings.get("default_hashtags") or [],
             )
         except RateLimited as exc:
-            log.warning("Gemini 429 â€” Ä‘á»ƒ áº£nh %s láº¡i cho láº§n cháº¡y sau (%s)", pid, exc)
-            notes.append("â³ Gemini bá»‹ giá»›i háº¡n tá»‘c Ä‘á»™, má»™t sá»‘ áº£nh sáº½ xá»­ lÃ½ á»Ÿ láº§n cháº¡y sau.")
+            log.warning("Gemini 429 — để ảnh %s lại cho lần chạy sau (%s)", pid, exc)
+            notes.append("⏳ Gemini bị giới hạn tốc độ, một số ảnh sẽ xử lý ở lần chạy sau.")
             break
         except CaptionError as exc:
-            message = f"AI khÃ´ng táº¡o Ä‘Æ°á»£c caption: {exc}"
+            message = f"AI không tạo được caption: {exc}"
             database.update_photo(
                 db,
                 pid,
@@ -113,7 +113,7 @@ def process_pending(
                 error_message=message,
             )
             database.log_event(db, "error", message, photo_id=pid)
-            notes.append(f"âš ï¸ 1 áº£nh cáº§n viáº¿t caption tay ({database_short(pid)})")
+            notes.append(f"⚠️ 1 ảnh cần viết caption tay ({database_short(pid)})")
             stats["failed"] += 1
             continue
 
@@ -140,7 +140,7 @@ def process_pending(
         database.log_event(
             db,
             "info",
-            f"ÄÃ£ táº¡o caption (tin cáº­y {result['confidence']:.2f})",
+            f"Đã tạo caption (tin cậy {result['confidence']:.2f})",
             photo_id=pid,
             detail={"warnings": result["warnings"], "status": status},
         )
@@ -152,7 +152,7 @@ def database_short(pid: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# BÆ°á»›c 3: xáº¿p lá»‹ch áº£nh approved
+# Bước 3: xếp lịch ảnh approved
 # ---------------------------------------------------------------------------
 
 def schedule_approved(
@@ -167,13 +167,13 @@ def schedule_approved(
         db, ["approved"], order="created_at.asc", limit=max(1, cfg.max_photos_per_run * 3)
     )
     if not approved:
-        log.info("KhÃ´ng cÃ³ áº£nh approved cáº§n xáº¿p lá»‹ch.")
+        log.info("Không có ảnh approved cần xếp lịch.")
         return
 
     now = datetime.now(timezone.utc)
     horizon = int(settings.get("horizon_days", 7))
 
-    # CÃ¡c bÃ i Ä‘Ã£ chiáº¿m chá»— trong khoáº£ng thá»i gian tá»›i
+    # Các bài đã chiếm chỗ trong khoảng thời gian tới
     taken: list[datetime] = []
     busy = db.select(
         "photos",
@@ -199,11 +199,11 @@ def schedule_approved(
     )
 
     if not slots:
-        log.warning("KhÃ´ng cÃ²n khung giá» trá»‘ng trong %d ngÃ y tá»›i.", horizon)
+        log.warning("Không còn khung giờ trống trong %d ngày tới.", horizon)
         notify.send(
             cfg.telegram_token,
             cfg.telegram_chat_id,
-            "âš ï¸ KhÃ´ng cÃ²n khung giá» trá»‘ng Ä‘á»ƒ xáº¿p lá»‹ch. HÃ£y tÄƒng sá»‘ bÃ i/ngÃ y hoáº·c giáº£m áº£nh trong kho.",
+            "⚠️ Không còn khung giờ trống để xếp lịch. Hãy tăng số bài/ngày hoặc giảm ảnh trong kho.",
             silent=True,
         )
         return
@@ -216,20 +216,20 @@ def schedule_approved(
             photo.get("caption") or "", photo.get("hashtags") or []
         )
         if not message.strip():
-            database.update_photo(db, pid, status="captioned", error_message="Caption rá»—ng")
+            database.update_photo(db, pid, status="captioned", error_message="Caption rỗng")
             continue
 
         if dry_run:
             print(
-                f"[DRY-RUN] Sáº½ lÃªn lá»‹ch {database_short(pid)} lÃºc "
+                f"[DRY-RUN] Sẽ lên lịch {database_short(pid)} lúc "
                 f"{slot.astimezone().isoformat()} | {message.splitlines()[0][:60]}"
             )
             stats["scheduled"] += 1
             continue
 
-        # Chá»‘ng trÃ¹ng: claim nguyÃªn tá»­ trÆ°á»›c khi gá»i Facebook
+        # Chống trùng: claim nguyên tử trước khi gọi Facebook
         if not database.claim_for_scheduling(db, pid):
-            log.info("áº¢nh %s Ä‘Ã£ Ä‘Æ°á»£c xá»­ lÃ½ bá»Ÿi tiáº¿n trÃ¬nh khÃ¡c, bá» qua.", database_short(pid))
+            log.info("Ảnh %s đã được xử lý bởi tiến trình khác, bỏ qua.", database_short(pid))
             continue
 
         try:
@@ -250,15 +250,15 @@ def schedule_approved(
                 notify.send(
                     cfg.telegram_token,
                     cfg.telegram_chat_id,
-                    "ðŸš¨ <b>Token Facebook háº¿t háº¡n hoáº·c bá»‹ thu há»“i.</b>\n"
-                    "ÄÃ£ dá»«ng xáº¿p lá»‹ch. HÃ£y láº¥y Page Access Token má»›i vÃ  cáº­p nháº­t "
-                    "secret <code>FB_PAGE_ACCESS_TOKEN</code> trÃªn GitHub.",
+                    "🚨 <b>Token Facebook hết hạn hoặc bị thu hồi.</b>\n"
+                    "Đã dừng xếp lịch. Hãy lấy Page Access Token mới và cập nhật "
+                    "secret <code>FB_PAGE_ACCESS_TOKEN</code> trên GitHub.",
                 )
                 break
             continue
-        except Exception as exc:  # lá»—i Storage, máº¡ng... khÃ´ng lÃ m há»ng cáº£ láº§n cháº¡y
+        except Exception as exc:  # lỗi Storage, mạng... không làm hỏng cả lần chạy
             database.update_photo(db, pid, status="failed", error_message=str(exc)[:900])
-            database.log_event(db, "error", f"Lá»—i khi lÃªn lá»‹ch: {exc}", photo_id=pid)
+            database.log_event(db, "error", f"Lỗi khi lên lịch: {exc}", photo_id=pid)
             stats["failed"] += 1
             continue
 
@@ -273,16 +273,16 @@ def schedule_approved(
         database.log_event(
             db,
             "info",
-            f"ÄÃ£ lÃªn lá»‹ch lÃºc {slot.isoformat()}",
+            f"Đã lên lịch lúc {slot.isoformat()}",
             photo_id=pid,
             detail={"fb_post_id": fb_post_id},
         )
         stats["scheduled"] += 1
-        log.info("LÃªn lá»‹ch %s -> %s", database_short(pid), slot.isoformat())
+        log.info("Lên lịch %s -> %s", database_short(pid), slot.isoformat())
 
 
 # ---------------------------------------------------------------------------
-# BÆ°á»›c 4 + 5: Ä‘á»“ng bá»™ tráº¡ng thÃ¡i & dá»n áº£nh
+# Bước 4 + 5: đồng bộ trạng thái & dọn ảnh
 # ---------------------------------------------------------------------------
 
 def sync_posted(db: database.Supabase, cfg: Config, stats: dict[str, int], *, dry_run: bool) -> None:
@@ -299,13 +299,13 @@ def sync_posted(db: database.Supabase, cfg: Config, stats: dict[str, int], *, dr
     if not rows:
         return
     if dry_run:
-        print(f"[DRY-RUN] Sáº½ Ä‘Ã¡nh dáº¥u {len(rows)} bÃ i lÃ  Ä‘Ã£ Ä‘Äƒng.")
+        print(f"[DRY-RUN] Sẽ đánh dấu {len(rows)} bài là đã đăng.")
         return
 
     fb = None
     for row in rows:
         pid = row["id"]
-        # Kiá»ƒm tra bÃ i cÃ³ thá»±c sá»± tá»“n táº¡i trÆ°á»›c khi Ä‘Ã¡nh dáº¥u (tÃ¹y chá»n, an toÃ n)
+        # Kiểm tra bài có thực sự tồn tại trước khi đánh dấu (tùy chọn, an toàn)
         if row.get("fb_post_id") and cfg.fb_page_token:
             fb = fb or FacebookClient(cfg.fb_page_id, cfg.fb_page_token, cfg.fb_graph_version)
             try:
@@ -314,18 +314,18 @@ def sync_posted(db: database.Supabase, cfg: Config, stats: dict[str, int], *, dr
                         db,
                         pid,
                         status="failed",
-                        error_message="BÃ i khÃ´ng cÃ²n tá»“n táº¡i trÃªn Facebook (cÃ³ thá»ƒ Ä‘Ã£ bá»‹ xÃ³a).",
+                        error_message="Bài không còn tồn tại trên Facebook (có thể đã bị xóa).",
                     )
-                    database.log_event(db, "warn", "BÃ i Ä‘Ã£ bá»‹ xÃ³a trÃªn Facebook", photo_id=pid)
+                    database.log_event(db, "warn", "Bài đã bị xóa trên Facebook", photo_id=pid)
                     stats["failed"] += 1
                     continue
             except FacebookError as exc:
-                log.warning("KhÃ´ng kiá»ƒm tra Ä‘Æ°á»£c bÃ i %s: %s", row.get("fb_post_id"), exc)
+                log.warning("Không kiểm tra được bài %s: %s", row.get("fb_post_id"), exc)
 
         database.update_photo(
             db, pid, status="posted", posted_at=row.get("scheduled_at") or now.isoformat()
         )
-        database.log_event(db, "info", "ÄÃ£ Ä‘Äƒng thÃ nh cÃ´ng (Ä‘á»“ng bá»™)", photo_id=pid)
+        database.log_event(db, "info", "Đã đăng thành công (đồng bộ)", photo_id=pid)
         stats["posted"] += 1
 
 
@@ -349,12 +349,12 @@ def cleanup_storage(
     removed = 0
     for row in rows:
         if dry_run:
-            print(f"[DRY-RUN] Sáº½ xÃ³a file {row['storage_path']}")
+            print(f"[DRY-RUN] Sẽ xóa file {row['storage_path']}")
         else:
             try:
                 db.remove("photos", row["storage_path"])
             except Exception as exc:
-                log.warning("KhÃ´ng xÃ³a Ä‘Æ°á»£c file %s: %s", row["storage_path"], exc)
+                log.warning("Không xóa được file %s: %s", row["storage_path"], exc)
                 continue
         removed += 1
     stats["cleaned"] = removed
@@ -365,9 +365,9 @@ def cleanup_storage(
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Worker Ä‘Äƒng bÃ i Facebook Page")
-    parser.add_argument("--dry-run", action="store_true", help="Chá»‰ in káº¿ hoáº¡ch, khÃ´ng gá»i Facebook")
-    parser.add_argument("--limit", type=int, default=0, help="Giá»›i háº¡n sá»‘ áº£nh xá»­ lÃ½ láº§n nÃ y")
+    parser = argparse.ArgumentParser(description="Worker đăng bài Facebook Page")
+    parser.add_argument("--dry-run", action="store_true", help="Chỉ in kế hoạch, không gọi Facebook")
+    parser.add_argument("--limit", type=int, default=0, help="Giới hạn số ảnh xử lý lần này")
     args = parser.parse_args(argv)
 
     load_dotenv()
@@ -377,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg.require("supabase_url", "supabase_service_key")
     if not cfg.dry_run:
-        cfg.require("gemini_api_key", "fb_page_id", "fb_page_token")
+        cfg.require("gemini_api_key")
 
     db = database.Supabase(cfg.supabase_url, cfg.supabase_service_key)
     stats = {"captioned": 0, "scheduled": 0, "posted": 0, "failed": 0, "cleaned": 0}
@@ -387,26 +387,49 @@ def main(argv: list[str] | None = None) -> int:
     try:
         settings = database.get_settings(db)
         if not settings:
-            log.warning("ChÆ°a cÃ³ settings â€” hÃ£y Ä‘Äƒng nháº­p PWA má»™t láº§n Ä‘á»ƒ khá»Ÿi táº¡o.")
+            log.warning("Chưa có settings — hãy đăng nhập PWA một lần để khởi tạo.")
             return 0
 
         if settings.get("paused"):
-            log.info("Äang táº¡m dá»«ng (paused=true) â€” thoÃ¡t.")
+            log.info("Đang tạm dừng (paused=true) — thoát.")
             return 0
+
+        # Chưa cấu hình Facebook: chưa có gì để đăng thì bỏ qua (không báo lỗi),
+        # chỉ báo lỗi khi trong kho thật sự có ảnh đang chờ.
+        if not cfg.dry_run and not (cfg.fb_page_id and cfg.fb_page_token):
+            waiting = db.select(
+                "photos",
+                {"select": "id", "status": "in.(pending,captioned,approved,scheduled)"},
+            )
+            if not waiting:
+                log.warning(
+                    "Chưa cấu hình Facebook (FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN) "
+                    "và kho chưa có ảnh — bỏ qua lần chạy này."
+                )
+                return 0
+            message = (
+                f"⚠️ <b>Chưa cấu hình Facebook</b>\n"
+                f"Đang có {len(waiting)} ảnh trong kho nhưng thiếu secret "
+                f"<code>FB_PAGE_ID</code> / <code>FB_PAGE_ACCESS_TOKEN</code>.\n"
+                "Bài sẽ không được lên lịch cho tới khi thêm đủ 2 secret này."
+            )
+            log.error(message.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", ""))
+            notify.send(cfg.telegram_token, cfg.telegram_chat_id, message)
+            return 1
 
         if not cfg.dry_run:
             run_id = database.acquire_run_lock(db)
             if run_id is None:
-                log.info("Má»™t láº§n cháº¡y khÃ¡c Ä‘ang hoáº¡t Ä‘á»™ng â€” thoÃ¡t.")
+                log.info("Một lần chạy khác đang hoạt động — thoát.")
                 return 0
 
         if cfg.dry_run:
-            print("=== DRY RUN â€” khÃ´ng gá»i Facebook, khÃ´ng ghi DB ===")
+            print("=== DRY RUN — không gọi Facebook, không ghi DB ===")
             print(f"Model AI: {cfg.gemini_model} | Graph API: {cfg.fb_graph_version}")
             print(
-                f"Cáº¥u hÃ¬nh: {settings.get('posts_per_day')} bÃ i/ngÃ y | "
-                f"khung giá» {settings.get('time_windows')} | "
-                f"duyá»‡t tay: {settings.get('require_approval')}"
+                f"Cấu hình: {settings.get('posts_per_day')} bài/ngày | "
+                f"khung giờ {settings.get('time_windows')} | "
+                f"duyệt tay: {settings.get('require_approval')}"
             )
 
         if not cfg.dry_run:
@@ -418,10 +441,10 @@ def main(argv: list[str] | None = None) -> int:
             sync_posted(db, cfg, stats, dry_run=False)
             cleanup_storage(db, settings, dry_run=False, stats=stats)
             database.log_event(
-                db, "info", "Worker káº¿t thÃºc", detail={**stats, "notes": notes}
+                db, "info", "Worker kết thúc", detail={**stats, "notes": notes}
             )
 
-        # Thá»‘ng kÃª cÃ²n láº¡i
+        # Thống kê còn lại
         remaining_rows = db.select(
             "photos",
             {"select": "id", "status": "in.(pending,captioned,approved)"},
@@ -453,13 +476,13 @@ def main(argv: list[str] | None = None) -> int:
             database.finish_run_lock(db, run_id, {**stats, "coverage": coverage})
         return 0
 
-    except Exception as exc:  # lá»—i toÃ n cá»¥c: bÃ¡o Telegram rá»“i thoÃ¡t mÃ£ lá»—i
-        log.exception("Worker lá»—i")
+    except Exception as exc:  # lỗi toàn cục: báo Telegram rồi thoát mã lỗi
+        log.exception("Worker lỗi")
         if not cfg.dry_run:
             notify.send(
                 cfg.telegram_token,
                 cfg.telegram_chat_id,
-                f"ðŸš¨ <b>Worker lá»—i</b>\n<code>{notify.esc(str(exc))[:800]}</code>",
+                f"🚨 <b>Worker lỗi</b>\n<code>{notify.esc(str(exc))[:800]}</code>",
             )
             database.finish_run_lock(db, run_id, {"error": str(exc)[:500], **stats})
         return 1
