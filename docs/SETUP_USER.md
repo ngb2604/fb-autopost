@@ -94,25 +94,26 @@ Làm đúng thứ tự dưới đây. Mỗi bước có **kết quả cần ghi 
 3. Bấm **Generate Access Token** → cửa sổ Facebook hiện ra → **chọn đúng Page** → **Continue** → đồng ý các quyền.
 4. Copy token ngắn hạn (dạng `EAA...`).
 
-### 3.4 Đổi sang token dài hạn (60 ngày)
-1. Mở <https://developers.facebook.com/tools/debug/accesstoken/>.
-2. Dán token vừa copy → **Debug** → kéo xuống **Extend Access Token** → làm theo hướng dẫn.
-3. Copy token mới.
+### 3.4 Đổi sang token dài hạn + lấy Page Access Token (tự động)
+Trên máy có repo, chạy 1 lệnh (cần `gh` đã đăng nhập và `FB_APP_ID`/`FB_APP_SECRET` trong `.env`):
 
-### 3.5 Lấy Page ID và Page Access Token
-Cách nhanh nhất (dùng Graph API Explorer):
-1. Quay lại <https://developers.facebook.com/tools/explorer/>.
-2. Ô query, nhập: `me/accounts` → **Submit**.
-3. Trong kết quả JSON, tìm Page của bạn:
-   - `id` → chính là `FB_PAGE_ID`
-   - `access_token` → chính là `FB_PAGE_ACCESS_TOKEN` (**token này không hết hạn nếu lấy từ token dài hạn**)
+```bash
+python scripts/fb_token.py --token "EAA..." --app-id <App ID> --app-secret <App Secret>
+```
 
-> ✅ Ghi lại:
-> - `FB_PAGE_ID` = ..............................
-> - `FB_PAGE_ACCESS_TOKEN` = ..............................
->
-> ⏰ Token dài hạn khoảng **60 ngày**. Đặt lịch nhắc trên điện thoại để làm lại bước 3.3–3.5
-> trước khi hết hạn. Khi token hết hạn, bot sẽ gửi Telegram cảnh báo và **dừng đăng** (không đăng sai).
+Script sẽ: đổi token 1 giờ → token **60 ngày** → gọi `/me/accounts` lấy Page token
+→ in ra hạn dùng của cả hai → nạp `FB_PAGE_ID`, `FB_PAGE_ACCESS_TOKEN`, `FB_USER_TOKEN`,
+`FB_APP_SECRET`, `FB_APP_ID` lên GitHub Secrets.
+
+- Nếu script báo `An unexpected error has occurred`: token vừa tạo đã "cũ", bấm
+  **Generate Access Token** lại trong Explorer rồi chạy script ngay với token mới.
+- Cách thủ công (không cần App Secret): <https://developers.facebook.com/tools/debug/accesstoken/>
+  → dán token → **Extend Access Token** → nhập mật khẩu Facebook → copy token mới, rồi tự lấy
+  `me/accounts` để điền secret.
+- `FB_APP_SECRET` **chỉ** dùng để gia hạn token, không đưa vào PWA.
+
+> ✅ Kết quả đúng (đã kiểm tra thực tế): **Page token hết hạn: không hết hạn** — bot chạy vĩnh viễn,
+> không phải gia hạn định kỳ. Chỉ khi bạn đổi mật khẩu Facebook hoặc gỡ quyền của app thì mới cần làm lại.
 
 ---
 
@@ -177,7 +178,10 @@ Mất khoảng 3 phút. Làm trên **điện thoại** (Telegram app) hoặc Tel
 | `SUPABASE_SERVICE_ROLE_KEY` | khóa secret của Supabase |
 | `GEMINI_API_KEY` | `AIza...` |
 | `FB_PAGE_ID` | ID Page |
-| `FB_PAGE_ACCESS_TOKEN` | `EAA...` |
+| `FB_PAGE_ACCESS_TOKEN` | `EAA...` (token Page, không hết hạn) |
+| `FB_USER_TOKEN` | token người dùng dài hạn — chỉ dùng để gia hạn/khôi phục |
+| `FB_APP_ID` | App ID của app Meta |
+| `FB_APP_SECRET` | App Secret — **chỉ** dùng để gia hạn token, không lên PWA |
 | `TELEGRAM_BOT_TOKEN` | `123456:AAH...` |
 | `TELEGRAM_CHAT_ID` | `123456789` |
 
