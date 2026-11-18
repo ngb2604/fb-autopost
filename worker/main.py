@@ -1,14 +1,16 @@
 """Điểm vào của worker: chạy bởi GitHub Actions (cron hoặc workflow_dispatch).
 
-Luồng (mục 7.2 của đặc tả):
+Mô hình mới: 1 BÀI = 1 NHÓM ẢNH cùng phân loại (album) hoặc 1 ảnh.
+
+Luồng:
 1. Đọc settings; nếu paused -> thoát.
-2. Xử lý ảnh `pending`: Gemini viết caption -> `captioned` (nếu duyệt tay)
-   hoặc `approved`.
-3. Xếp lịch ảnh `approved`: tính khung giờ trống -> gọi Facebook
-   (`published=false`, `scheduled_publish_time`) -> `scheduled`.
-4. Đồng bộ: ảnh `scheduled` đã qua giờ -> `posted`.
-5. Dọn ảnh cũ trong Storage theo `retention_days`.
-6. Gửi Telegram tổng kết + cảnh báo khi sắp hết ảnh.
+2. Lấy ảnh đang dùng được (chưa dùng, hoặc đã quá `reuse_days`).
+3. Lập kế hoạch bài: gom ảnh theo phân loại, xoay vòng loại + kiểu đăng.
+4. Với mỗi bài: tạo post + gắn ảnh, gọi Gemini viết caption từ TẤT CẢ ảnh.
+5. Xếp lịch bài `ready`: tính khung giờ trống -> đăng album/ảnh lên Facebook
+   (`published=false` + `scheduled_publish_time`) -> `scheduled`.
+6. Đồng bộ bài đã tới giờ -> `posted` (ảnh vẫn dùng lại được sau `reuse_days`).
+7. Gửi Telegram tổng kết + cảnh báo khi sắp hết ảnh.
 
 Chạy thử:  python -m worker.main --dry-run
 """
@@ -16,19 +18,19 @@ Chạy thử:  python -m worker.main --dry-run
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from . import db as database
-from .env import load_dotenv
 from . import notify
-from .caption import CaptionError, RateLimited, generate_caption, needs_manual_review
+from .caption import CaptionError, RateLimited, generate_caption
 from .config import Config
+from .env import load_dotenv
 from .facebook import FacebookClient, FacebookError
-from .scheduler import build_slots, coverage_days
+from .posts import plan_posts, plan_summary
+from .scheduler import build_slots
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,9 +45,13 @@ def build_message(caption: str, hashtags: list[str] | None) -> str:
     return f"{caption.strip()}\n\n{tags}".strip()
 
 
+def short(ident: str) -> str:
+    return str(ident)[:8]
+
+
 def recent_captions(db: database.Supabase, limit: int = 5) -> list[str]:
     rows = db.select(
-        "photos",
+        "posts",
         {
             "select": "caption",
             "caption": "not.is.null",
@@ -56,35 +62,100 @@ def recent_captions(db: database.Supabase, limit: int = 5) -> list[str]:
     return [r["caption"] for r in rows if r.get("caption")]
 
 
+def category_lookup(categories: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(c["id"]): c for c in categories}
+
+
 # ---------------------------------------------------------------------------
-# Bước 2: viết caption cho ảnh pending
+# Bước 2-4: tạo bài từ ảnh trong kho
 # ---------------------------------------------------------------------------
 
-def process_pending(
+def create_posts(
     db: database.Supabase,
     cfg: Config,
     settings: dict[str, Any],
+    categories: list[dict[str, Any]],
     stats: dict[str, int],
     notes: list[str],
+    *,
+    dry_run: bool = False,
 ) -> None:
-    limit = max(1, cfg.max_photos_per_run)
-    photos = database.list_photos(db, ["pending"], limit=limit)
-    if not photos:
-        log.info("Không có ảnh pending.")
+    reuse_days = int(settings.get("reuse_days", 14))
+    album_size = int(settings.get("album_size", 4))
+    max_posts = int(settings.get("max_posts_per_run", 6))
+    styles = settings.get("post_styles") or ["album", "single"]
+    rotate = bool(settings.get("category_rotation", True))
+    require_approval = bool(settings.get("require_approval", False))
+
+    available = database.available_photos(db, reuse_days=reuse_days, limit=300)
+    if not available:
+        log.info("Không còn ảnh nào dùng được.")
         return
 
-    log.info("Xử lý %d ảnh pending...", len(photos))
-    history = recent_captions(db)
-    require_approval = bool(settings.get("require_approval", True))
+    plans = plan_posts(
+        available,
+        categories,
+        album_size=album_size,
+        styles=list(styles),
+        max_posts=max_posts,
+        rotate=rotate,
+    )
+    if not plans:
+        log.info("Không lập được bài nào từ %d ảnh.", len(available))
+        return
 
-    for photo in photos:
-        pid = photo["id"]
-        try:
-            raw = db.download("photos", photo["storage_path"])
-        except Exception as exc:
-            database.update_photo(db, pid, status="failed", error_message=f"Không tải được ảnh: {exc}")
-            database.log_event(db, "error", "Không tải được ảnh từ Storage", photo_id=pid)
+    log.info("Kế hoạch: %s", plan_summary(plans))
+
+    if dry_run:
+        print(f"[DRY-RUN] Có {len(available)} ảnh dùng được. Kế hoạch {len(plans)} bài:")
+        for p in plans:
+            print(
+                f"  - {p['category_name'] or 'Chưa phân loại'} | {p['style']} | "
+                f"{len(p['photos'])} ảnh: "
+                + ", ".join(short(ph["id"]) for ph in p["photos"])
+            )
+        stats["created_posts"] = len(plans)
+        stats["photos_used"] = sum(len(p["photos"]) for p in plans)
+        return
+
+    cats = category_lookup(categories)
+    history = recent_captions(db)
+
+    for plan in plans:
+        cat = cats.get(str(plan.get("category_id") or "")) or {}
+        photos = plan["photos"]
+        photo_ids = [p["id"] for p in photos]
+
+        post = database.create_post(
+            db,
+            category_id=plan.get("category_id"),
+            style=plan["style"],
+            photo_ids=photo_ids,
+        )
+        post_id = post["id"]
+
+        # Tải ảnh về để gửi Gemini (album: gửi tất cả ảnh trong 1 lượt)
+        images: list[bytes] = []
+        bad_photo = None
+        for photo in photos:
+            try:
+                images.append(db.download("photos", photo["storage_path"]))
+            except Exception as exc:
+                bad_photo = photo["id"]
+                log.warning("Không tải được ảnh %s: %s", short(bad_photo), exc)
+                break
+
+        if bad_photo or not images:
+            database.update_post(
+                db, post_id, status="failed", error_message="Không tải được ảnh từ Storage"
+            )
+            database.release_photos(db, photo_ids)
+            if bad_photo:
+                database.update_photo(
+                    db, bad_photo, status="failed", error_message="Không tải được ảnh"
+                )
             stats["failed"] += 1
+            notes.append(f"⚠️ 1 ảnh bị lỗi đọc file ({short(bad_photo or '')})")
             continue
 
         try:
@@ -92,36 +163,38 @@ def process_pending(
                 api_key=cfg.gemini_api_key,
                 model=cfg.gemini_model,
                 fallback_models=cfg.gemini_fallbacks,
-                image_bytes=raw,
+                image_bytes=images,
                 tone=settings.get("tone", ""),
                 shop_info=settings.get("shop_info", ""),
                 sample_posts=settings.get("sample_posts") or [],
                 recent_captions=history,
                 default_hashtags=settings.get("default_hashtags") or [],
+                category_name=cat.get("name", ""),
+                category_hint=cat.get("hint", ""),
+                category_hashtags=cat.get("hashtags") or [],
+                style=plan["style"],
             )
         except RateLimited as exc:
-            log.warning("Gemini 429 — để ảnh %s lại cho lần chạy sau (%s)", pid, exc)
-            notes.append("⏳ Gemini bị giới hạn tốc độ, một số ảnh sẽ xử lý ở lần chạy sau.")
+            log.warning("Gemini 429 — hoãn tạo bài (%s)", exc)
+            database.delete_post(db, post_id)
+            database.release_photos(db, photo_ids)
+            notes.append("⏳ Gemini bị giới hạn tốc độ, các bài còn lại để lần chạy sau.")
             break
         except CaptionError as exc:
             message = f"AI không tạo được caption: {exc}"
-            database.update_photo(
-                db,
-                pid,
-                status="captioned",
-                caption="",
-                error_message=message,
-            )
-            database.log_event(db, "error", message, photo_id=pid)
-            notes.append(f"⚠️ 1 ảnh cần viết caption tay ({database_short(pid)})")
+            database.update_post(db, post_id, status="failed", error_message=message[:900])
+            database.release_photos(db, photo_ids)
+            # Ảnh đầu tiên bị lỗi -> đánh dấu để không lặp lại mỗi lần chạy
+            database.update_photo(db, photo_ids[0], status="failed", error_message=message[:900])
+            database.log_event(db, "error", message, detail={"post_id": post_id})
+            notes.append(f"⚠️ 1 bài lỗi caption ({short(post_id)})")
             stats["failed"] += 1
             continue
 
-        manual, reason = needs_manual_review(result)
-        status = "captioned" if (require_approval or manual) else "approved"
-        database.update_photo(
+        status = "draft" if require_approval else "ready"
+        database.update_post(
             db,
-            pid,
+            post_id,
             status=status,
             caption=result["caption"],
             hashtags=result["hashtags"],
@@ -129,33 +202,51 @@ def process_pending(
                 "product_type": result["product_type"],
                 "confidence": result["confidence"],
                 "warnings": result["warnings"],
-                "manual_review_reason": reason,
                 "model": cfg.gemini_model,
+                "photo_count": len(images),
             },
             error_message=None,
         )
         history.insert(0, result["caption"])
         history = history[:5]
-        stats["captioned"] += 1
+        stats["created_posts"] += 1
+        stats["photos_used"] += len(images)
         database.log_event(
             db,
             "info",
-            f"Đã tạo caption (tin cậy {result['confidence']:.2f})",
-            photo_id=pid,
-            detail={"warnings": result["warnings"], "status": status},
+            f"Đã tạo bài {plan['style']} ({len(images)} ảnh) — tin cậy {result['confidence']:.2f}",
+            detail={"post_id": post_id, "category": cat.get("name", "")},
         )
-        log.info("Caption xong cho %s -> %s", database_short(pid), status)
-
-
-def database_short(pid: str) -> str:
-    return pid[:8]
+        log.info(
+            " Bài %s: %s, %d ảnh -> %s",
+            short(post_id),
+            cat.get("name") or "Chưa phân loại",
+            len(images),
+            status,
+        )
 
 
 # ---------------------------------------------------------------------------
-# Bước 3: xếp lịch ảnh approved
+# Bước 5: xếp lịch các bài đã có caption
 # ---------------------------------------------------------------------------
 
-def schedule_approved(
+def _future_slots_taken(db: database.Supabase, now: datetime) -> list[datetime]:
+    rows = db.select(
+        "posts",
+        {
+            "select": "scheduled_at",
+            "status": "in.(scheduled,posted)",
+            "scheduled_at": f"gte.{now.isoformat()}",
+        },
+    )
+    out = []
+    for row in rows:
+        if row.get("scheduled_at"):
+            out.append(datetime.fromisoformat(row["scheduled_at"].replace("Z", "+00:00")))
+    return out
+
+
+def schedule_ready(
     db: database.Supabase,
     cfg: Config,
     settings: dict[str, Any],
@@ -163,30 +254,13 @@ def schedule_approved(
     *,
     dry_run: bool,
 ) -> None:
-    approved = database.list_photos(
-        db, ["approved"], order="created_at.asc", limit=max(1, cfg.max_photos_per_run * 3)
-    )
-    if not approved:
-        log.info("Không có ảnh approved cần xếp lịch.")
+    ready = database.list_posts(db, ["ready"], order="created_at.asc", limit=50)
+    if not ready:
+        log.info("Không có bài nào chờ xếp lịch.")
         return
 
     now = datetime.now(timezone.utc)
     horizon = int(settings.get("horizon_days", 7))
-
-    # Các bài đã chiếm chỗ trong khoảng thời gian tới
-    taken: list[datetime] = []
-    busy = db.select(
-        "photos",
-        {
-            "select": "scheduled_at",
-            "status": "in.(scheduled,posted)",
-            "scheduled_at": f"gte.{now.isoformat()}",
-        },
-    )
-    for row in busy:
-        if row.get("scheduled_at"):
-            taken.append(datetime.fromisoformat(row["scheduled_at"].replace("Z", "+00:00")))
-
     slots = build_slots(
         now=now,
         posts_per_day=int(settings.get("posts_per_day", 3)),
@@ -194,8 +268,8 @@ def schedule_approved(
         jitter_minutes=int(settings.get("jitter_minutes", 10)),
         timezone_name=settings.get("timezone", "Asia/Ho_Chi_Minh"),
         horizon_days=horizon,
-        taken=taken,
-        count=len(approved),
+        taken=_future_slots_taken(db, now),
+        count=len(ready),
     )
 
     if not slots:
@@ -203,48 +277,54 @@ def schedule_approved(
         notify.send(
             cfg.telegram_token,
             cfg.telegram_chat_id,
-            "⚠️ Không còn khung giờ trống để xếp lịch. Hãy tăng số bài/ngày hoặc giảm ảnh trong kho.",
+            "⚠️ Không còn khung giờ trống để xếp lịch. Hãy tăng số bài/ngày.",
             silent=True,
         )
         return
 
-    fb = FacebookClient(cfg.fb_page_id, cfg.fb_page_token, cfg.fb_graph_version)
+    by_post = database.posts_with_photos(db, [p["id"] for p in ready])
+    fb = None
 
-    for photo, slot in zip(approved, slots):
-        pid = photo["id"]
-        message = build_message(
-            photo.get("caption") or "", photo.get("hashtags") or []
-        )
-        if not message.strip():
-            database.update_photo(db, pid, status="captioned", error_message="Caption rỗng")
+    for post, slot in zip(ready, slots):
+        pid = post["id"]
+        photos = by_post.get(pid, [])
+        photo_ids = [p["id"] for p in photos]
+        message = build_message(post.get("caption") or "", post.get("hashtags") or [])
+
+        if not message.strip() or not photos:
+            database.update_post(
+                db, pid, status="failed", error_message="Thiếu caption hoặc ảnh"
+            )
+            database.release_photos(db, photo_ids)
+            stats["failed"] += 1
             continue
 
         if dry_run:
             print(
-                f"[DRY-RUN] Sẽ lên lịch {database_short(pid)} lúc "
+                f"[DRY-RUN] Bài {short(pid)} ({len(photos)} ảnh) lúc "
                 f"{slot.astimezone().isoformat()} | {message.splitlines()[0][:60]}"
             )
             stats["scheduled"] += 1
             continue
 
-        # Chống trùng: claim nguyên tử trước khi gọi Facebook
-        if not database.claim_for_scheduling(db, pid):
-            log.info("Ảnh %s đã được xử lý bởi tiến trình khác, bỏ qua.", database_short(pid))
+        # Giữ chỗ nguyên tử trước khi gọi Facebook
+        if not database.claim_post(db, pid):
+            log.info("Bài %s đã được xử lý bởi tiến trình khác.", short(pid))
             continue
 
+        fb = fb or FacebookClient(cfg.fb_page_id, cfg.fb_page_token, cfg.fb_graph_version)
         try:
-            raw = db.download("photos", photo["storage_path"])
-            fb_post_id = fb.schedule_photo(
-                image_bytes=raw,
+            images = [db.download("photos", p["storage_path"]) for p in photos]
+            fb_post_id = fb.schedule_post(
+                images=images,
                 message=message,
                 scheduled_at=int(slot.timestamp()),
             )
         except FacebookError as exc:
-            message_err = f"Facebook: {exc} (code={exc.code}, subcode={exc.subcode})"
-            database.update_photo(
-                db, pid, status="failed", error_message=message_err[:900]
-            )
-            database.log_event(db, "error", message_err, photo_id=pid)
+            err = f"Facebook: {exc} (code={exc.code}, subcode={exc.subcode})"
+            database.update_post(db, pid, status="failed", error_message=err[:900])
+            database.release_photos(db, photo_ids)
+            database.log_event(db, "error", err, detail={"post_id": pid})
             stats["failed"] += 1
             if exc.is_token_error:
                 notify.send(
@@ -256,13 +336,14 @@ def schedule_approved(
                 )
                 break
             continue
-        except Exception as exc:  # lỗi Storage, mạng... không làm hỏng cả lần chạy
-            database.update_photo(db, pid, status="failed", error_message=str(exc)[:900])
-            database.log_event(db, "error", f"Lỗi khi lên lịch: {exc}", photo_id=pid)
+        except Exception as exc:
+            database.update_post(db, pid, status="failed", error_message=str(exc)[:900])
+            database.release_photos(db, photo_ids)
+            database.log_event(db, "error", f"Lỗi khi lên lịch: {exc}", detail={"post_id": pid})
             stats["failed"] += 1
             continue
 
-        database.update_photo(
+        database.update_post(
             db,
             pid,
             status="scheduled",
@@ -270,25 +351,25 @@ def schedule_approved(
             fb_post_id=fb_post_id,
             error_message=None,
         )
+        database.mark_photos_used(db, photo_ids)
         database.log_event(
             db,
             "info",
-            f"Đã lên lịch lúc {slot.isoformat()}",
-            photo_id=pid,
-            detail={"fb_post_id": fb_post_id},
+            f"Đã lên lịch {len(photos)} ảnh lúc {slot.isoformat()}",
+            detail={"post_id": pid, "fb_post_id": fb_post_id},
         )
         stats["scheduled"] += 1
-        log.info("Lên lịch %s -> %s", database_short(pid), slot.isoformat())
+        log.info("Lên lịch bài %s (%d ảnh) -> %s", short(pid), len(photos), slot.isoformat())
 
 
 # ---------------------------------------------------------------------------
-# Bước 4 + 5: đồng bộ trạng thái & dọn ảnh
+# Bước 6: đồng bộ trạng thái & dọn ảnh
 # ---------------------------------------------------------------------------
 
 def sync_posted(db: database.Supabase, cfg: Config, stats: dict[str, int], *, dry_run: bool) -> None:
     now = datetime.now(timezone.utc)
     rows = db.select(
-        "photos",
+        "posts",
         {
             "select": "id,scheduled_at,fb_post_id",
             "status": "eq.scheduled",
@@ -302,47 +383,78 @@ def sync_posted(db: database.Supabase, cfg: Config, stats: dict[str, int], *, dr
         print(f"[DRY-RUN] Sẽ đánh dấu {len(rows)} bài là đã đăng.")
         return
 
+    ids = [r["id"] for r in rows]
+    by_post = database.posts_with_photos(db, ids)
     fb = None
+
     for row in rows:
         pid = row["id"]
-        # Kiểm tra bài có thực sự tồn tại trước khi đánh dấu (tùy chọn, an toàn)
+        photo_ids = [p["id"] for p in by_post.get(pid, [])]
         if row.get("fb_post_id") and cfg.fb_page_token:
             fb = fb or FacebookClient(cfg.fb_page_id, cfg.fb_page_token, cfg.fb_graph_version)
             try:
                 if not fb.post_exists(row["fb_post_id"]):
-                    database.update_photo(
+                    database.update_post(
                         db,
                         pid,
                         status="failed",
                         error_message="Bài không còn tồn tại trên Facebook (có thể đã bị xóa).",
                     )
-                    database.log_event(db, "warn", "Bài đã bị xóa trên Facebook", photo_id=pid)
+                    database.release_photos(db, photo_ids)
+                    database.log_event(db, "warn", "Bài đã bị xóa trên Facebook", detail={"post_id": pid})
                     stats["failed"] += 1
                     continue
             except FacebookError as exc:
                 log.warning("Không kiểm tra được bài %s: %s", row.get("fb_post_id"), exc)
 
-        database.update_photo(
-            db, pid, status="posted", posted_at=row.get("scheduled_at") or now.isoformat()
+        database.update_post(
+            db,
+            pid,
+            status="posted",
+            posted_at=row.get("scheduled_at") or now.isoformat(),
         )
-        database.log_event(db, "info", "Đã đăng thành công (đồng bộ)", photo_id=pid)
+        database.mark_photos_posted(db, photo_ids)
+        database.log_event(db, "info", "Đã đăng thành công (đồng bộ)", detail={"post_id": pid})
         stats["posted"] += 1
+
+
+def recover_stuck(db: database.Supabase) -> None:
+    """Trả lại các bài bị kẹt ở 'scheduling' do lần chạy trước bị ngắt."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+    rows = db.select(
+        "posts",
+        {
+            "select": "id",
+            "status": "eq.scheduling",
+            "updated_at": f"lt.{cutoff}",
+            "limit": "20",
+        },
+    )
+    for row in rows:
+        by_post = database.posts_with_photos(db, [row["id"]])
+        photo_ids = [p["id"] for p in by_post.get(row["id"], [])]
+        database.update_post(
+            db, row["id"], status="ready", error_message="Tự khôi phục sau lần chạy bị ngắt"
+        )
+        database.release_photos(db, photo_ids)
+        log.warning("Khôi phục bài kẹt %s", short(row["id"]))
 
 
 def cleanup_storage(
     db: database.Supabase, settings: dict[str, Any], *, dry_run: bool, stats: dict[str, int]
 ) -> None:
+    """Dọn file của ảnh đã bị bỏ qua (ảnh đã đăng được giữ lại để dùng lại)."""
     days = int(settings.get("retention_days", 7))
     if days <= 0:
         return
-    cutoff_dt = datetime.now(timezone.utc) - __import__("datetime").timedelta(days=days)
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
     rows = db.select(
         "photos",
         {
-            "select": "id,storage_path,posted_at",
-            "status": "eq.posted",
+            "select": "id,storage_path",
+            "status": "eq.skipped",
             "storage_path": "not.is.null",
-            "posted_at": f"lt.{cutoff_dt.isoformat()}",
+            "created_at": f"lt.{cutoff_dt.isoformat()}",
             "limit": "50",
         },
     )
@@ -367,20 +479,24 @@ def cleanup_storage(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Worker đăng bài Facebook Page")
     parser.add_argument("--dry-run", action="store_true", help="Chỉ in kế hoạch, không gọi Facebook")
-    parser.add_argument("--limit", type=int, default=0, help="Giới hạn số ảnh xử lý lần này")
+    parser.add_argument("--limit", type=int, default=0, help="Giới hạn số bài tạo lần này")
     args = parser.parse_args(argv)
 
     load_dotenv()
     cfg = Config.from_env(dry_run=args.dry_run)
-    if args.limit:
-        cfg.max_photos_per_run = args.limit
-
     cfg.require("supabase_url", "supabase_service_key")
     if not cfg.dry_run:
         cfg.require("gemini_api_key")
 
     db = database.Supabase(cfg.supabase_url, cfg.supabase_service_key)
-    stats = {"captioned": 0, "scheduled": 0, "posted": 0, "failed": 0, "cleaned": 0}
+    stats = {
+        "created_posts": 0,
+        "photos_used": 0,
+        "scheduled": 0,
+        "posted": 0,
+        "failed": 0,
+        "cleaned": 0,
+    }
     notes: list[str] = []
     run_id = None
 
@@ -394,12 +510,14 @@ def main(argv: list[str] | None = None) -> int:
             log.info("Đang tạm dừng (paused=true) — thoát.")
             return 0
 
-        # Chưa cấu hình Facebook thì vẫn viết caption bình thường, chỉ không lên lịch.
+        if args.limit:
+            settings = {**settings, "max_posts_per_run": max(1, args.limit)}
+
         fb_ready = bool(cfg.fb_page_id and cfg.fb_page_token)
         if not cfg.dry_run and not fb_ready:
             log.warning(
                 "Chưa cấu hình Facebook (FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN) — "
-                "vẫn viết caption, nhưng bỏ qua bước lên lịch."
+                "vẫn tạo caption, nhưng bỏ qua bước lên lịch."
             )
 
         if not cfg.dry_run:
@@ -407,55 +525,54 @@ def main(argv: list[str] | None = None) -> int:
             if run_id is None:
                 log.info("Một lần chạy khác đang hoạt động — thoát.")
                 return 0
+            recover_stuck(db)
+
+        categories = database.list_categories(db)
 
         if cfg.dry_run:
             print("=== DRY RUN — không gọi Facebook, không ghi DB ===")
             print(f"Model AI: {cfg.gemini_model} | Graph API: {cfg.fb_graph_version}")
             print(
                 f"Cấu hình: {settings.get('posts_per_day')} bài/ngày | "
-                f"khung giờ {settings.get('time_windows')} | "
-                f"duyệt tay: {settings.get('require_approval')}"
+                f"{settings.get('album_size', 4)} ảnh/bài | "
+                f"dùng lại sau {settings.get('reuse_days', 14)} ngày | "
+                f"luân phiên: {settings.get('category_rotation', True)}"
             )
 
         if not cfg.dry_run:
-            process_pending(db, cfg, settings, stats, notes)
+            create_posts(db, cfg, settings, categories, stats, notes, dry_run=False)
+        else:
+            create_posts(db, cfg, settings, categories, stats, notes, dry_run=True)
 
         if cfg.dry_run or fb_ready:
-            schedule_approved(db, cfg, settings, stats, dry_run=cfg.dry_run)
+            schedule_ready(db, cfg, settings, stats, dry_run=cfg.dry_run)
 
         if not cfg.dry_run:
             sync_posted(db, cfg, stats, dry_run=False)
             cleanup_storage(db, settings, dry_run=False, stats=stats)
-            database.log_event(
-                db, "info", "Worker kết thúc", detail={**stats, "notes": notes}
-            )
+            database.log_event(db, "info", "Worker kết thúc", detail={**stats, "notes": notes})
 
-        # Thống kê còn lại
-        remaining_rows = db.select(
-            "photos",
-            {"select": "id", "status": "in.(pending,captioned,approved)"},
-        )
-        scheduled_rows = db.select("photos", {"select": "id", "status": "eq.scheduled"})
-        coverage = coverage_days(
-            approved_count=len(remaining_rows),
-            posts_per_day=int(settings.get("posts_per_day", 3)),
-            scheduled_count=len(scheduled_rows),
-            timezone_name=settings.get("timezone", "Asia/Ho_Chi_Minh"),
-        )
+        # Thống kê ảnh còn dùng được
+        reuse_days = int(settings.get("reuse_days", 14))
+        available = database.available_photos(db, reuse_days=reuse_days, limit=1000)
+        album_size = max(1, int(settings.get("album_size", 4)))
+        posts_per_day = max(1, int(settings.get("posts_per_day", 3)))
+        coverage = round(len(available) / album_size / posts_per_day, 1)
 
-        if not cfg.dry_run and not fb_ready and remaining_rows:
+        if not cfg.dry_run and not fb_ready and available:
             notes.append(
-                f"⚠️ {len(remaining_rows)} ảnh đang chờ nhưng chưa có token Facebook "
+                f"⚠️ {len(available)} ảnh đang chờ nhưng chưa có token Facebook "
                 "→ chưa lên lịch được."
             )
 
         msg = notify.summary_message(
-            captioned=stats["captioned"],
+            created_posts=stats["created_posts"],
+            photos_used=stats["photos_used"],
             scheduled=stats["scheduled"],
             posted=stats["posted"],
             failed=stats["failed"],
-            remaining=len(remaining_rows),
-            posts_per_day=int(settings.get("posts_per_day", 3)),
+            remaining_photos=len(available),
+            posts_per_day=posts_per_day,
             coverage=coverage,
             dry_run=cfg.dry_run,
             notes=notes,
@@ -484,4 +601,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

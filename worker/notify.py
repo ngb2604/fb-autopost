@@ -65,11 +65,12 @@ def esc(text: str) -> str:
 
 def summary_message(
     *,
-    captioned: int,
+    created_posts: int,
+    photos_used: int,
     scheduled: int,
     posted: int,
     failed: int,
-    remaining: int,
+    remaining_photos: int,
     posts_per_day: int,
     coverage: float,
     dry_run: bool,
@@ -79,11 +80,11 @@ def summary_message(
     head = f"{icon} <b>Worker đã chạy</b>" + (" (dry-run)" if dry_run else "")
     lines = [
         head,
-        f"• Caption mới: <b>{captioned}</b>",
+        f"• Bài mới tạo: <b>{created_posts}</b> ({photos_used} ảnh)",
         f"• Đã lên lịch: <b>{scheduled}</b>",
         f"• Đã đăng (đồng bộ): <b>{posted}</b>",
         f"• Lỗi: <b>{failed}</b>",
-        f"• Ảnh còn trong kho: <b>{remaining}</b>",
+        f"• Ảnh còn dùng được: <b>{remaining_photos}</b>",
     ]
     if coverage < 2:
         lines.append(

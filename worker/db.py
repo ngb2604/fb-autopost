@@ -104,6 +104,18 @@ def get_settings(db: Supabase) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+def list_categories(db: Supabase) -> list[dict[str, Any]]:
+    """Danh sách phân loại mặt hàng (kèm cả loại đã tắt để hiển thị tên)."""
+    try:
+        return db.select(
+            "categories",
+            {"select": "id,name,hint,hashtags,active,sort_order", "order": "sort_order.asc,name.asc"},
+        )
+    except Exception as exc:  # DB cũ chưa có bảng -> bot vẫn chạy bình thường
+        log.warning("Không đọc được bảng categories: %s", exc)
+        return []
+
+
 def ensure_settings(db: Supabase) -> dict[str, Any]:
     """App 1 người dùng: lấy settings duy nhất, tạo mới nếu chưa có."""
     s = get_settings(db)
@@ -127,6 +139,127 @@ def list_photos(
         "limit": str(limit),
     }
     return db.select("photos", params)
+
+
+# ---------------------------------------------------------------------------
+# Bài đăng (posts) + ảnh của bài (post_photos)
+# ---------------------------------------------------------------------------
+
+POST_FIELDS = "id,category_id,style,status,caption,hashtags,scheduled_at,fb_post_id,error_message,created_at"
+
+
+def available_photos(
+    db: Supabase, reuse_days: int = 14, limit: int = 200
+) -> list[dict[str, Any]]:
+    """Ảnh đang dùng được: chưa dùng bao giờ, hoặc đã quá hạn dùng lại."""
+    rows = db.rpc(
+        "available_photos",
+        {"p_reuse_days": int(reuse_days), "p_limit": int(limit)},
+    )
+    return rows or []
+
+
+def list_posts(
+    db: Supabase,
+    statuses: list[str],
+    *,
+    order: str = "created_at.asc",
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    return db.select(
+        "posts",
+        {
+            "select": POST_FIELDS,
+            "status": "in.(" + ",".join(statuses) + ")",
+            "order": order,
+            "limit": str(limit),
+        },
+    )
+
+
+def update_post(db: Supabase, post_id: str, **values: Any) -> None:
+    db.update("posts", {"id": f"eq.{post_id}"}, values)
+
+
+def create_post(
+    db: Supabase,
+    *,
+    category_id: str | None,
+    style: str,
+    photo_ids: list[str],
+) -> dict[str, Any]:
+    """Tạo bài + gắn ảnh + giữ chỗ ảnh (status='scheduled')."""
+    rows = db.insert(
+        "posts",
+        {"category_id": category_id, "style": style, "status": "draft"},
+    )
+    post = rows[0]
+    db.insert(
+        "post_photos",
+        [
+            {"post_id": post["id"], "photo_id": pid, "position": i}
+            for i, pid in enumerate(photo_ids)
+        ],
+    )
+    if photo_ids:
+        db.rpc("reserve_photos", {"p_ids": photo_ids})
+    return post
+
+
+def posts_with_photos(
+    db: Supabase, post_ids: list[str]
+) -> dict[str, list[dict[str, Any]]]:
+    """Trả về {post_id: [{id, storage_path, status}, ...]} theo đúng thứ tự."""
+    if not post_ids:
+        return {}
+    links = db.select(
+        "post_photos",
+        {
+            "select": "post_id,photo_id,position",
+            "post_id": "in.(" + ",".join(post_ids) + ")",
+            "order": "position.asc",
+        },
+    )
+    if not links:
+        return {}
+    photo_ids = sorted({r["photo_id"] for r in links})
+    photos = db.select(
+        "photos",
+        {
+            "select": "id,storage_path,status,used_at,use_count",
+            "id": "in.(" + ",".join(photo_ids) + ")",
+        },
+    )
+    by_id = {p["id"]: p for p in photos}
+    out: dict[str, list[dict[str, Any]]] = {}
+    for link in links:
+        photo = by_id.get(link["photo_id"])
+        if photo:
+            out.setdefault(link["post_id"], []).append(photo)
+    return out
+
+
+def claim_post(db: Supabase, post_id: str) -> bool:
+    return bool(db.rpc("claim_post", {"p_id": post_id}))
+
+
+def mark_photos_used(db: Supabase, photo_ids: list[str]) -> None:
+    if photo_ids:
+        db.rpc("mark_photos_used", {"p_ids": photo_ids})
+
+
+def mark_photos_posted(db: Supabase, photo_ids: list[str]) -> None:
+    if photo_ids:
+        db.rpc("mark_photos_posted", {"p_ids": photo_ids})
+
+
+def release_photos(db: Supabase, photo_ids: list[str]) -> None:
+    if photo_ids:
+        db.rpc("release_photos", {"p_ids": photo_ids})
+
+
+def delete_post(db: Supabase, post_id: str) -> None:
+    db.http.delete(f"{db.url}/rest/v1/posts", params={"id": f"eq.{post_id}"})
 
 
 def update_photo(db: Supabase, photo_id: str, **values: Any) -> None:

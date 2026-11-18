@@ -81,6 +81,9 @@ Quy tắc:
 - Viết bằng tiếng Việt, giọng: {tone}.
 - Bám sát thông tin shop sau (nếu có): {shop_info}
 - Học giọng văn từ các bài mẫu (không chép nguyên văn): {sample_posts}
+- Phân loại mặt hàng của ảnh này: {category}
+- Ghi chú của shop cho loại hàng này (nếu có): {category_hint}
+- Kiểu bài đăng: {style_hint}
 - CHỈ mô tả những gì thực sự nhìn thấy trong ảnh hoặc có trong thông tin shop.
 - TUYỆT ĐỐI KHÔNG bịa giá, kích cỡ, chất liệu, thương hiệu, khuyến mãi, tình trạng hàng
   nếu không có trong ảnh hoặc thông tin shop. Nếu thiếu, dùng câu mời liên hệ thay vì đoán.
@@ -94,12 +97,27 @@ Các caption gần đây (KHÔNG được mở đầu giống hoặc lặp lại
 """
 
 
+STYLE_HINTS = {
+    "album": (
+        "Album nhiều ảnh của cùng một loại hàng. Viết như một đợt hàng/collection: "
+        "nêu điểm chung của cả lô, mời khách xem hết các ảnh, gợi ý số lượng/độ đa dạng "
+        "nếu thấy rõ trong ảnh."
+    ),
+    "single": (
+        "Bài một ảnh. Tập trung mô tả đúng món đồ trong ảnh, ngắn gọn, dễ đọc."
+    ),
+}
+
+
 def build_prompt(
     *,
     tone: str,
     shop_info: str,
     sample_posts: list[str] | None,
     recent_captions: list[str] | None,
+    category_name: str = "",
+    category_hint: str = "",
+    style: str = "",
 ) -> str:
     samples = "\n---\n".join(sample_posts or []) or "(chưa có)"
     recent = "\n---\n".join(recent_captions or []) or "(chưa có)"
@@ -108,6 +126,9 @@ def build_prompt(
         shop_info=shop_info or "(chưa có)",
         sample_posts=samples,
         recent_captions=recent,
+        category=category_name or "(không rõ — tự nhận diện từ ảnh)",
+        category_hint=category_hint or "(không có)",
+        style_hint=STYLE_HINTS.get(style, STYLE_HINTS["album"]),
     )
 
 
@@ -204,25 +225,23 @@ def _call_gemini(
     api_key: str,
     model: str,
     prompt: str,
-    image_jpeg: bytes,
-    timeout: float = 90.0,
+    images: list[bytes],
+    timeout: float = 120.0,
 ) -> str:
-    """Gọi Gemini, trả về text thô. Ném RateLimited khi 429."""
-    body = {
-        "contents": [
+    """Gọi Gemini với 1 hoặc nhiều ảnh, trả về text thô. Ném RateLimited khi 429."""
+    parts: list[dict[str, Any]] = [{"text": prompt}]
+    for img in images:
+        parts.append(
             {
-                "role": "user",
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": base64.b64encode(image_jpeg).decode(),
-                        }
-                    },
-                ],
+                "inline_data": {
+                    "mime_type": "image/jpeg",
+                    "data": base64.b64encode(img).decode(),
+                }
             }
-        ],
+        )
+
+    body = {
+        "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {
             "temperature": 1.0,
             "responseMimeType": "application/json",
@@ -259,28 +278,42 @@ def generate_caption(
     *,
     api_key: str,
     model: str,
-    image_bytes: bytes,
+    image_bytes: bytes | list[bytes],
     tone: str,
     shop_info: str,
     sample_posts: list[str] | None = None,
     recent_captions: list[str] | None = None,
     default_hashtags: list[str] | None = None,
+    category_name: str = "",
+    category_hint: str = "",
+    category_hashtags: list[str] | None = None,
+    style: str = "album",
     fallback_models: list[str] | None = None,
     max_retries: int = 2,
     retry_wait: float = 8.0,
 ) -> dict[str, Any]:
     """Trả về dict đã validate. Ném CaptionError / RateLimited.
 
+    `image_bytes` có thể là 1 ảnh hoặc danh sách ảnh (album). Gemini nhận tất cả
+    các ảnh trong cùng một lượt để viết một caption chung.
+
     Nếu model chính quá tải (503) hoặc đã bị gỡ (404), tự thử các model trong
     `fallback_models` — giúp bot không chết khi Google đổi model/quá tải.
     """
-    image_jpeg = prepare_image(image_bytes)
+    raw_images = image_bytes if isinstance(image_bytes, list) else [image_bytes]
+    if not raw_images:
+        raise CaptionError("Không có ảnh để viết caption")
+    images = [prepare_image(img) for img in raw_images]
     prompt = build_prompt(
         tone=tone,
         shop_info=shop_info,
         sample_posts=sample_posts,
         recent_captions=recent_captions,
+        category_name=category_name,
+        category_hint=category_hint,
+        style=style,
     )
+    hashtag_defaults = list(default_hashtags or []) + list(category_hashtags or [])
 
     chain = [model] + [m for m in (fallback_models or []) if m and m != model]
     last_error: Exception | None = None
@@ -288,8 +321,8 @@ def generate_caption(
     for candidate in chain:
         for attempt in range(max_retries + 1):
             try:
-                text = _call_gemini(api_key=api_key, model=candidate, prompt=prompt, image_jpeg=image_jpeg)
-                result = parse_caption_json(text, defaults=default_hashtags)
+                text = _call_gemini(api_key=api_key, model=candidate, prompt=prompt, images=images)
+                result = parse_caption_json(text, defaults=hashtag_defaults)
                 if candidate != model:
                     log.warning("Đã dùng model dự phòng: %s", candidate)
                 return result

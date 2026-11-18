@@ -1,0 +1,43 @@
+name: Kiểm tra Facebook
+
+# Công cụ vận hành: xem các bài đang hẹn giờ trên Page, hoặc xóa 1 bài theo ID.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "list = xem bài đang hẹn giờ, delete = xóa 1 bài"
+        type: choice
+        options:
+          - list
+          - delete
+        default: list
+      post_id:
+        description: "ID bài cần xóa (chỉ dùng khi action=delete)"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cài httpx
+        run: pip install httpx
+
+      - name: Chạy
+        env:
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          FB_GRAPH_VERSION: ${{ vars.FB_GRAPH_VERSION || 'v26.0' }}
+        run: |
+          python scripts/fb_ops.py --action "${{ inputs.action }}" --post-id "${{ inputs.post_id }}"

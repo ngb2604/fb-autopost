@@ -129,7 +129,7 @@ h3 { font-size: 1.05rem; }
 .btn.big { width: 100%; padding: 15px; font-size: 1rem; }
 .btn.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 
-input, textarea {
+input, textarea, select {
   width: 100%;
   font: inherit;
   color: var(--text);
@@ -139,7 +139,7 @@ input, textarea {
   padding: 12px 13px;
   margin-top: 6px;
 }
-input:focus, textarea:focus { outline: 2px solid color-mix(in srgb, var(--primary) 55%, transparent); outline-offset: 1px; }
+input:focus, textarea:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--primary) 55%, transparent); outline-offset: 1px; }
 textarea { resize: vertical; }
 input[type="range"] { padding: 0; background: none; border: none; accent-color: var(--primary); }
 input[type="checkbox"] { width: 26px; height: 26px; accent-color: var(--primary); margin: 0; }
@@ -270,7 +270,7 @@ label.switch {
   position: fixed;
   left: 0; right: 0; bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
@@ -325,4 +325,102 @@ dialog.sheet::backdrop { background: rgba(2, 6, 23, 0.55); backdrop-filter: blur
   max-width: 88vw;
   text-align: center;
   z-index: 50;
+}
+
+/* ---------------- Tài khoản / phân loại / bài đăng ---------------- */
+.auth-tabs { justify-content: center; margin-bottom: 6px; }
+
+.select-inline {
+  width: auto;
+  max-width: 46%;
+  margin-top: 0;
+  padding: 10px 12px;
+  font-size: 0.86rem;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.photo-card .cat-tag {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  max-width: calc(100% - 48px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  font-weight: 650;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.62);
+  color: #fff;
+  backdrop-filter: blur(6px);
+}
+
+.item.single { grid-template-columns: 1fr; }
+.item .meta.warn, .post-item .meta.warn { color: var(--warn); }
+
+.row-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.row-title .badge { position: static; }
+
+.post-item {
+  display: grid;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+.post-item .head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.post-item .head .badge {
+  position: static;
+  font-size: 0.68rem;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(100, 116, 139, 0.9);
+}
+.post-item .head strong { color: var(--text); font-size: 0.86rem; }
+.post-item .cap {
+  font-size: 0.9rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+.post-item .meta { font-size: 0.78rem; color: var(--muted); }
+.post-item .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+
+.thumbs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.thumbs::-webkit-scrollbar { display: none; }
+.thumbs img {
+  width: 76px;
+  height: 76px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex: 0 0 auto;
+  background: var(--surface-2);
+}
+.thumbs .ph-more {
+  width: 76px;
+  height: 76px;
+  border-radius: 10px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 650;
 }

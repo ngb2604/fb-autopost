@@ -13,6 +13,7 @@ Nguyên tắc an toàn:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -193,6 +194,61 @@ class FacebookClient:
         if not post_id:
             raise FacebookError(f"Tạo bài lên lịch thất bại: {res}")
         log.info("Đã lên lịch qua feed, post_id=%s (photo_id=%s)", post_id, photo_id)
+        return str(post_id)
+
+    def schedule_post(
+        self,
+        *,
+        images: list[bytes],
+        message: str,
+        scheduled_at: int,
+    ) -> str:
+        """Lên lịch một bài đăng (1 ảnh hoặc album nhiều ảnh), trả về fb_post_id.
+
+        - 1 ảnh  -> POST /{page}/photos (nhanh, ít lỗi).
+        - >1 ảnh -> upload từng ảnh ở chế độ ẩn (published=false), sau đó tạo
+          bài /{page}/feed với `attached_media[i]` — đây là cách Facebook hỗ trợ
+          bài nhiều ảnh có hẹn giờ.
+        """
+        if not images:
+            raise FacebookError("Không có ảnh để đăng")
+        if len(images) == 1:
+            return self.schedule_photo(
+                image_bytes=images[0], message=message, scheduled_at=scheduled_at
+            )
+        return self._schedule_album(images, message, scheduled_at)
+
+    def _upload_unpublished(self, image_bytes: bytes) -> str:
+        files = {"source": ("photo.jpg", image_bytes, "image/jpeg")}
+        uploaded = self._request(
+            "POST",
+            f"{self.page_id}/photos",
+            data={"published": "false", "access_token": self.token},
+            files=files,
+        )
+        photo_id = uploaded.get("id")
+        if not photo_id:
+            raise FacebookError(f"Upload ảnh thất bại: {uploaded}")
+        return str(photo_id)
+
+    def _schedule_album(self, images: list[bytes], message: str, scheduled_at: int) -> str:
+        media_ids = [self._upload_unpublished(img) for img in images]
+        data: dict[str, str] = {
+            "message": message,
+            "published": "false",
+            "scheduled_publish_time": str(scheduled_at),
+            "access_token": self.token,
+        }
+        for i, mid in enumerate(media_ids):
+            data[f"attached_media[{i}]"] = json.dumps({"media_fbid": mid})
+
+        res = self._request("POST", f"{self.page_id}/feed", data=data)
+        post_id = res.get("id")
+        if not post_id:
+            raise FacebookError(f"Tạo bài album thất bại: {res}")
+        log.info(
+            "Đã lên lịch album %d ảnh, post_id=%s", len(media_ids), post_id
+        )
         return str(post_id)
 
     def post_photo_now(self, *, image_bytes: bytes, message: str) -> str:

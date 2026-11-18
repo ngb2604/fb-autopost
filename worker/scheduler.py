@@ -165,3 +165,43 @@ def coverage_days(
     total = max(0, approved_count) + max(0, scheduled_count)
     per_day = max(1, int(posts_per_day))
     return round(total / per_day, 1)
+
+
+def order_by_category(
+    photos: list[dict],
+    *,
+    enabled: bool = True,
+) -> list[dict]:
+    """Xen kẽ ảnh theo phân loại (round-robin) để các loại hàng luân phiên nhau.
+
+    - Đầu vào đã sắp theo thứ tự mong muốn (thường là created_at tăng dần).
+    - Trong mỗi loại giữ nguyên thứ tự đó.
+    - Ảnh chưa gán loại được coi là một nhóm riêng (xếp cuối).
+    - `enabled=False` thì trả về nguyên thứ tự ban đầu.
+    """
+    if not enabled or not photos:
+        return list(photos)
+
+    buckets: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for p in photos:
+        key = p.get("category_id") or ""
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(p)
+
+    # Nhóm "chưa phân loại" luôn xếp sau cùng
+    order = [k for _, k in sorted(enumerate(order), key=lambda t: (t[1] == "", t[0]))]
+
+    out: list[dict] = []
+    while True:
+        progressed = False
+        for key in order:
+            if buckets[key]:
+                out.append(buckets[key].pop(0))
+                progressed = True
+        if not progressed:
+            break
+    return out
+

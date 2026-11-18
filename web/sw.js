@@ -2,7 +2,7 @@
  * Dữ liệu (ảnh, DB) luôn lấy từ mạng — không cache để tránh dữ liệu cũ.
  */
 
-const CACHE = "autopost-shell-v2";
+const CACHE = "autopost-shell-v3";
 const SHELL = [
   "./",
   "./index.html",

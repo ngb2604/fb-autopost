@@ -88,6 +88,28 @@ def test_prompt_co_du_thong_tin_shop_va_bai_mau():
     assert "KHÔNG bịa giá" in p
 
 
+def test_prompt_co_phan_loai_va_kieu_bai():
+    p = build_prompt(
+        tone="thân thiện",
+        shop_info="",
+        sample_posts=None,
+        recent_captions=None,
+        category_name="Ghế văn phòng",
+        category_hint="Ghế lưới còn tốt",
+        style="single",
+    )
+    assert "Ghế văn phòng" in p
+    assert "Ghế lưới còn tốt" in p
+    assert "Bài một ảnh" in p
+
+
+def test_prompt_mac_dinh_la_album():
+    p = build_prompt(
+        tone="", shop_info="", sample_posts=None, recent_captions=None
+    )
+    assert "Album nhiều ảnh" in p
+
+
 def test_prepare_image_resize_va_xoay():
     img = Image.new("RGB", (3000, 1200), "white")
     buf = io.BytesIO()

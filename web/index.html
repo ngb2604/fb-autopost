@@ -13,11 +13,11 @@
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="icons/icon-180.png" />
 <link rel="icon" href="icons/icon-192.png" />
-<link rel="stylesheet" href="style.css?v=4" />
+<link rel="stylesheet" href="style.css?v=5" />
 </head>
 <body>
 
-<!-- ================= Đăng nhập ================= -->
+<!-- ================= Đăng nhập / Đăng ký ================= -->
 <section id="login-view" class="login-view" hidden>
   <div class="login-card">
     <div class="brand">
@@ -25,6 +25,12 @@
       <h1>Auto Post</h1>
       <p class="muted">Đăng bài tự động lên Facebook Page</p>
     </div>
+
+    <div class="chips auth-tabs" id="auth-tabs">
+      <button type="button" class="chip active" data-auth="login">Đăng nhập</button>
+      <button type="button" class="chip" data-auth="signup">Tạo tài khoản</button>
+    </div>
+
     <form id="login-form" class="stack">
       <label>
         Email
@@ -37,7 +43,53 @@
       <button type="submit" class="btn primary big" id="login-btn">Đăng nhập</button>
       <p id="login-error" class="error" role="alert" hidden></p>
     </form>
-    <p class="hint">Tài khoản do bạn tạo trong Supabase. Đăng ký công khai đã bị tắt.</p>
+
+    <form id="signup-form" class="stack" hidden>
+      <label>
+        Email
+        <input type="email" id="signup-email" autocomplete="username" inputmode="email" required />
+      </label>
+      <label>
+        Tên hiển thị
+        <input type="text" id="signup-name" autocomplete="name" placeholder="Ví dụ: Chủ shop" />
+      </label>
+      <label>
+        Mật khẩu (ít nhất 6 ký tự)
+        <input type="password" id="signup-password" autocomplete="new-password" minlength="6" required />
+      </label>
+      <label>
+        Nhập lại mật khẩu
+        <input type="password" id="signup-password2" autocomplete="new-password" minlength="6" required />
+      </label>
+      <label>
+        Mã mời
+        <input type="text" id="signup-invite" placeholder="Mã mời của shop" required />
+        <span class="hint">Hỏi chủ shop để lấy mã. Không có mã thì tài khoản không dùng được.</span>
+      </label>
+      <button type="submit" class="btn primary big" id="signup-btn">Tạo tài khoản</button>
+      <p id="signup-error" class="error" role="alert" hidden></p>
+    </form>
+  </div>
+</section>
+
+<!-- ================= Nhập mã mời (tài khoản chưa kích hoạt) ================= -->
+<section id="invite-view" class="login-view" hidden>
+  <div class="login-card">
+    <div class="brand">
+      <img src="icons/icon-192.png" alt="" width="56" height="56" />
+      <h1>Kích hoạt tài khoản</h1>
+      <p class="muted" id="invite-email"></p>
+    </div>
+    <form id="invite-form" class="stack">
+      <label>
+        Mã mời
+        <input type="text" id="invite-code" placeholder="Mã mời của shop" required />
+      </label>
+      <button type="submit" class="btn primary big" id="invite-btn">Kích hoạt</button>
+      <p id="invite-error" class="error" role="alert" hidden></p>
+    </form>
+    <p class="hint">Tài khoản chưa được kích hoạt nên chưa xem được dữ liệu của shop.</p>
+    <button id="invite-logout" class="btn ghost big" type="button" style="margin-top:10px">Đăng xuất</button>
   </div>
 </section>
 
@@ -54,22 +106,31 @@
       <div class="toolbar">
         <button id="add-photos-btn" class="btn primary" type="button">＋ Thêm ảnh</button>
         <input id="file-input" type="file" accept="image/*" multiple hidden />
+        <select id="upload-category" class="select-inline" aria-label="Phân loại khi thêm ảnh"></select>
         <span id="upload-status" class="muted small"></span>
       </div>
       <div id="upload-progress" class="progress" hidden><div class="bar"></div></div>
       <div class="chips" id="status-filters"></div>
+      <div class="chips" id="category-filters"></div>
       <div id="photo-grid" class="grid"></div>
       <p id="library-empty" class="empty" hidden>Chưa có ảnh nào. Bấm “Thêm ảnh” để bắt đầu.</p>
     </section>
 
-    <!-- ---------- Hàng đợi ---------- -->
-    <section id="tab-queue" class="tab" hidden>
+    <!-- ---------- Bài đăng ---------- -->
+    <section id="tab-posts" class="tab" hidden>
+      <div class="chips" id="post-filters"></div>
+      <div id="post-list" class="list"></div>
+      <p id="posts-empty" class="empty" hidden>Chưa có bài nào. Worker sẽ tự gom ảnh cùng loại thành bài khi chạy.</p>
+    </section>
+
+    <!-- ---------- Phân loại ---------- -->
+    <section id="tab-categories" class="tab" hidden>
       <div class="toolbar">
-        <button id="approve-all-btn" class="btn" type="button">Duyệt tất cả</button>
-        <span class="muted small" id="queue-count"></span>
+        <button id="add-category-btn" class="btn primary" type="button">＋ Thêm phân loại</button>
       </div>
-      <div id="queue-list" class="list"></div>
-      <p id="queue-empty" class="empty" hidden>Không có bài nào chờ xử lý.</p>
+      <div id="category-list" class="list"></div>
+      <p id="categories-empty" class="empty" hidden>Chưa có phân loại nào.</p>
+      <p class="hint">Ảnh cùng phân loại sẽ được gom thành một bài nhiều ảnh. Ghi chú giúp AI viết caption sát hàng hơn.</p>
     </section>
 
     <!-- ---------- Cài đặt ---------- -->
@@ -92,23 +153,51 @@
         </label>
 
         <label>
+          Số ảnh mỗi bài (album): <output id="album-out">4</output>
+          <input type="range" id="album_size" min="1" max="10" step="1" value="4" />
+          <span class="hint">Ví dụ 4: 10 ảnh ghế sẽ thành 2 bài (4 ảnh + 4 ảnh), 2 ảnh còn lại để lần sau.</span>
+        </label>
+
+        <label>
+          Dùng lại ảnh sau (ngày)
+          <input type="number" id="reuse_days" min="0" max="365" step="1" value="14" inputmode="numeric" />
+          <span class="hint">Ảnh đã đăng có thể xuất hiện lại trong bài mới sau số ngày này.</span>
+        </label>
+
+        <label>
+          Số bài tạo mỗi lần chạy
+          <input type="number" id="max_posts_per_run" min="1" max="20" step="1" value="6" inputmode="numeric" />
+          <span class="hint">Worker chạy vài lần mỗi ngày; mỗi lần tạo tối đa bao nhiêu bài.</span>
+        </label>
+
+        <label class="switch">
+          <span>Luân phiên phân loại (mỗi loại đều có bài)</span>
+          <input type="checkbox" id="category_rotation" />
+        </label>
+
+        <label class="switch">
+          <span>Luân phiên bài 1 ảnh và album nhiều ảnh</span>
+          <input type="checkbox" id="style_rotation" />
+        </label>
+
+        <label>
           Giọng văn
           <input type="text" id="tone" placeholder="thân thiện, tự nhiên, ngắn gọn" />
         </label>
 
         <label>
           Thông tin shop (tên, địa chỉ, SĐT, chính sách…)
-          <textarea id="shop_info" rows="4" placeholder="Shop Hoa Tươi ABC — 12 Lê Lợi, Q.1 — 0912 345 678&#10;Giao trong 2h nội thành, đổi trả trong 24h."></textarea>
+          <textarea id="shop_info" rows="4" placeholder="Shop đồ cũ — Ngõ 300 Nguyễn Xiển — 0973 807 223&#10;Giá sinh viên, bảo hành 1 tháng."></textarea>
         </label>
 
         <label>
           Bài mẫu (mỗi bài cách nhau bằng dòng trống)
-          <textarea id="sample_posts" rows="5" placeholder="Dán 2–3 bài đăng cũ bạn thích…"></textarea>
+          <textarea id="sample_posts" rows="4" placeholder="Dán 2–3 bài đăng cũ bạn thích…"></textarea>
         </label>
 
         <label>
           Hashtag mặc định
-          <input type="text" id="default_hashtags" placeholder="#shopabc, #quatang" />
+          <input type="text" id="default_hashtags" placeholder="#do cu, #thanhly" />
         </label>
 
         <label class="switch">
@@ -122,12 +211,27 @@
         </label>
 
         <label>
-          Giữ ảnh trong kho sau khi đăng (ngày)
+          Giữ ảnh đã bỏ qua trong kho (ngày)
           <input type="number" id="retention_days" min="0" max="365" step="1" value="7" inputmode="numeric" />
         </label>
 
         <button type="submit" class="btn primary big">Lưu cài đặt</button>
         <p id="settings-status" class="ok" hidden>Đã lưu ✓</p>
+      </form>
+
+      <form id="password-form" class="stack card" style="margin-top:14px">
+        <h3>Tài khoản</h3>
+        <p class="muted small" id="account-email"></p>
+        <label>
+          Mật khẩu mới
+          <input type="password" id="new_password" autocomplete="new-password" minlength="6" />
+        </label>
+        <label>
+          Nhập lại mật khẩu mới
+          <input type="password" id="new_password2" autocomplete="new-password" minlength="6" />
+        </label>
+        <button type="submit" class="btn big">Đổi mật khẩu</button>
+        <p id="password-status" class="ok" hidden>Đã đổi mật khẩu ✓</p>
       </form>
     </section>
 
@@ -142,17 +246,18 @@
 
   <nav class="tabbar" id="tabbar">
     <button data-tab="library" class="active"><span class="ico">🖼️</span>Kho ảnh</button>
-    <button data-tab="queue"><span class="ico">🗓️</span>Hàng đợi</button>
+    <button data-tab="posts"><span class="ico">📝</span>Bài đăng</button>
+    <button data-tab="categories"><span class="ico">🏷️</span>Phân loại</button>
     <button data-tab="settings"><span class="ico">⚙️</span>Cài đặt</button>
     <button data-tab="history"><span class="ico">📜</span>Lịch sử</button>
   </nav>
 </div>
 
-<!-- ================= Modal sửa bài ================= -->
+<!-- ================= Modal sửa bài đăng ================= -->
 <dialog id="edit-dialog" class="sheet">
   <form method="dialog" id="edit-form" class="stack">
     <h3>Sửa bài đăng</h3>
-    <img id="edit-thumb" alt="" class="edit-thumb" />
+    <div id="edit-thumbs" class="thumbs"></div>
     <label>
       Caption
       <textarea id="edit-caption" rows="6"></textarea>
@@ -173,10 +278,56 @@
   </form>
 </dialog>
 
+<!-- ================= Modal phân loại ================= -->
+<dialog id="category-dialog" class="sheet">
+  <form method="dialog" id="category-form" class="stack">
+    <h3 id="category-title">Thêm phân loại</h3>
+    <label>
+      Tên phân loại
+      <input type="text" id="category-name" placeholder="Ghế văn phòng" required />
+    </label>
+    <label>
+      Ghi chú cho AI (chất liệu, tình trạng, cách gọi…)
+      <textarea id="category-hint" rows="3" placeholder="Ghế xoay lưới, ghế da, còn tốt, giá sinh viên"></textarea>
+    </label>
+    <label>
+      Hashtag riêng
+      <input type="text" id="category-hashtags" placeholder="#ghevanphong #ghethanhly" />
+    </label>
+    <label class="switch">
+      <span>Đang dùng (bật để bot đăng loại này)</span>
+      <input type="checkbox" id="category-active" checked />
+    </label>
+    <p id="category-error" class="error" hidden></p>
+    <div class="row">
+      <button type="button" class="btn ghost" id="category-cancel">Đóng</button>
+      <button type="button" class="btn primary" id="category-save">Lưu</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ================= Modal sửa ảnh ================= -->
+<dialog id="photo-dialog" class="sheet">
+  <form method="dialog" id="photo-form" class="stack">
+    <h3>Sửa ảnh</h3>
+    <img id="photo-preview" class="edit-thumb" alt="" />
+    <p id="photo-meta" class="muted small"></p>
+    <label>
+      Phân loại
+      <select id="photo-category"></select>
+    </label>
+    <p class="hint">Ảnh cùng phân loại được gom thành một bài nhiều ảnh.</p>
+    <div class="row">
+      <button type="button" class="btn ghost" id="photo-cancel">Đóng</button>
+      <button type="button" class="btn primary" id="photo-save">Lưu</button>
+    </div>
+  </form>
+</dialog>
+
 <div id="toast" class="toast" hidden></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"></script>
-<script src="config.js?v=4"></script>
-<script src="app.js?v=4"></script>
+<script src="config.js?v=5"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
