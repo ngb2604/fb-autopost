@@ -6,8 +6,16 @@ on:
     - cron: "0 1 * * *"
   workflow_dispatch:
     inputs:
+      mode:
+        description: "Chế độ chạy"
+        type: choice
+        options:
+          - full
+          - classify
+          - dry_run
+        default: full
       dry_run:
-        description: "Chỉ chạy thử (không gọi Facebook)"
+        description: "Chỉ chạy thử (không gọi Facebook) — dùng mode=dry_run"
         type: boolean
         default: false
 
@@ -55,7 +63,9 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           MAX_PHOTOS_PER_RUN: ${{ vars.MAX_PHOTOS_PER_RUN || '5' }}
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "${{ inputs.mode }}" = "classify" ]; then
+            python -m worker.main --classify-only
+          elif [ "${{ inputs.mode }}" = "dry_run" ] || [ "${{ inputs.dry_run }}" = "true" ]; then
             python -m worker.main --dry-run
           else
             python -m worker.main

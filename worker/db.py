@@ -141,6 +141,39 @@ def list_photos(
     return db.select("photos", params)
 
 
+def list_unclassified_photos(db: Supabase, limit: int = 10) -> list[dict[str, Any]]:
+    """Ảnh chưa có phân loại và AI chưa từng thử phân loại."""
+    return db.select(
+        "photos",
+        {
+            "select": "id,storage_path,status",
+            "category_id": "is.null",
+            "classified_at": "is.null",
+            "status": "in.(pending,captioned,approved)",
+            "order": "created_at.asc",
+            "limit": str(limit),
+        },
+    )
+
+
+def count_unclassified_photos(db: Supabase) -> int:
+    r = db.http.head(
+        f"{db.url}/rest/v1/photos",
+        params={
+            "category_id": "is.null",
+            "classified_at": "is.null",
+            "status": "in.(pending,captioned,approved)",
+            "select": "id",
+        },
+        headers={"Prefer": "count=exact"},
+    )
+    if r.status_code >= 400:
+        return 0
+    # Content-Range: 0-9/42
+    total = r.headers.get("content-range", "").split("/")[-1]
+    return int(total) if total.isdigit() else 0
+
+
 # ---------------------------------------------------------------------------
 # Bài đăng (posts) + ảnh của bài (post_photos)
 # ---------------------------------------------------------------------------

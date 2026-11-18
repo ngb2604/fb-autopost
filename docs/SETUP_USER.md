@@ -28,21 +28,27 @@ Làm đúng thứ tự dưới đây. Mỗi bước có **kết quả cần ghi 
 
 ### 1.2 Chạy migration (tạo bảng, RLS, bucket ảnh)
 1. Trong project → menu trái → **SQL Editor** → **New query**.
-2. Mở file `supabase/migrations/0001_init.sql` trong repo, **copy toàn bộ** nội dung, dán vào editor.
-3. Bấm **Run** (Ctrl+Enter).
-4. ✅ Kết quả cần thấy: `Success. No rows returned`.
-5. Kiểm tra: menu **Storage** → phải thấy bucket **photos** (Private, có ổ khóa).
+2. Chạy **lần lượt** các file trong `supabase/migrations/` theo thứ tự tăng dần:
+   `0001_init.sql` → `0002_accounts_categories.sql` → `0003_posts.sql` →
+   `0004_worker_helpers.sql` → `0005_photo_reserve.sql` → `0006_pwa_post_actions.sql` →
+   `0007_fix_profiles_policy.sql` → `0008_auto_classify.sql`.
+   Với mỗi file: **copy toàn bộ** nội dung, dán vào editor, bấm **Run**.
+3. ✅ Kết quả cần thấy: `Success. No rows returned` sau mỗi file.
+4. Kiểm tra: menu **Storage** → phải thấy bucket **photos** (Private, có ổ khóa).
 
-### 1.3 Tạo tài khoản đăng nhập của bạn
-1. Menu **Authentication** → **Users** → **Add user** → **Create new user**.
-2. Email: email của bạn. Password: mật khẩu mạnh (lưu lại!).
-3. Bật **Auto Confirm User** (rất quan trọng, nếu không sẽ phải xác nhận email).
-4. Bấm **Create user**.
+### 1.3 Tạo tài khoản chủ shop (owner)
+1. Menu **Authentication** → **Sign In / Providers** → mục **Email**:
+   - Bật **Allow new users to sign up**.
+   - Bật **Confirm email** = **tắt** (Auto Confirm) để không phải xác nhận email.
+2. Mở PWA → tab **Tạo tài khoản** → nhập email + mật khẩu.
+3. Nhập **mã mời** (mặc định `MUABAN2026` — đổi trong bảng `app_config` nếu muốn).
+4. Tài khoản **đầu tiên** kích hoạt mã mời sẽ tự thành **owner** (chủ shop).
+   Người được mời sau khi nhập đúng mã cũng vào được app; người chưa kích hoạt
+   mã mời sẽ **không thấy dữ liệu nào** (chặn bằng RLS).
 
-### 1.4 Tắt đăng ký công khai (bắt buộc vì lý do bảo mật)
-1. **Authentication** → **Sign In / Providers** (hoặc **Providers**).
-2. Mục **Email** → tắt **Allow new users to sign up** (Disable signups).
-3. **Save**.
+> Muốn thêm người dùng: gửi họ link app + mã mời. Không cần tạo user trong dashboard.
+> Muốn thu hồi: xóa user trong **Authentication → Users** (dữ liệu của họ tự xóa theo).
+
 
 ### 1.5 Lấy 3 giá trị cần dùng
 1. **Project Settings** (bánh răng) → **API**.
@@ -61,7 +67,8 @@ Làm đúng thứ tự dưới đây. Mỗi bước có **kết quả cần ghi 
 2. **Create API key** → chọn project (hoặc để nó tự tạo).
 3. Copy khóa → ghi là `GEMINI_API_KEY` (dạng `AIza...`).
 
-> Gói miễn phí: model mặc định là `gemini-3.8-flash` (hỗ trợ ảnh).
+> Gói miễn phí: model mặc định `gemini-3.6-flash`, tự chuyển sang
+> `gemini-3.5-flash-lite` / `gemini-3.8-flash` khi model chính quá tải.
 > Lưu ý: gói miễn phí có thể dùng dữ liệu bạn gửi để cải thiện sản phẩm Google
 > → **không đưa ảnh có mặt khách hàng / thông tin cá nhân** vào.
 
@@ -170,7 +177,7 @@ Mất khoảng 3 phút. Làm trên **điện thoại** (Telegram app) hoặc Tel
 4. Đưa code lên (xem `README.md` mục "Đưa code lên GitHub" nếu chưa có).
 
 ### 5.2 Dán secret
-**Settings → Secrets and variables → Actions → New repository secret**, thêm đúng 7 cái:
+**Settings → Secrets and variables → Actions → New repository secret**, thêm đủ các secret sau:
 
 | Tên | Giá trị |
 |---|---|
@@ -186,9 +193,12 @@ Mất khoảng 3 phút. Làm trên **điện thoại** (Telegram app) hoặc Tel
 | `TELEGRAM_CHAT_ID` | `123456789` |
 
 Tùy chọn — tab **Variables**:
-- `GEMINI_MODEL` = `gemini-3.8-flash`
+- `GEMINI_MODEL` = `gemini-3.6-flash`
+- `GEMINI_MODEL_FALLBACKS` = `gemini-3.5-flash-lite,gemini-3.8-flash`
 - `FB_GRAPH_VERSION` = `v26.0`
-- `MAX_PHOTOS_PER_RUN` = `5`
+
+> Worker chạy hằng ngày, và có thể **Run workflow** với `mode = dry_run | classify | full`
+> (xem mục 7).
 
 ### 5.3 Host PWA bằng Cloudflare Pages (miễn phí, đã làm sẵn)
 App đang chạy tại: **https://fb-autopost.pages.dev/**
@@ -222,28 +232,39 @@ Sau khi sửa, commit và push — Cloudflare Pages sẽ tự deploy lại.
 
 1. Mở **https://fb-autopost.pages.dev/** **bằng Safari** (bắt buộc Safari, không dùng Chrome).
 2. Bấm nút **Chia sẻ** → **Thêm vào MH chính** (Add to Home Screen).
-3. Mở app từ Màn hình chính → đăng nhập bằng email/mật khẩu đã tạo ở bước 1.3.
-4. Vào tab **Cài đặt** → điền:
-   - Số bài/ngày (mặc định 3)
-   - Khung giờ đăng (mặc định 09:00, 12:00, 20:00)
-   - Thông tin shop
-   - 2–3 bài mẫu bạn thích
-   - Giữ **Bắt buộc duyệt tay** = BẬT trong tuần đầu
-5. Bấm **Lưu cài đặt**.
+3. Mở app từ Màn hình chính → **đăng nhập** (hoặc **Tạo tài khoản** + nhập mã mời).
+4. App có 5 tab:
+   - **Kho ảnh** — thêm ảnh, xem ảnh nào chờ AI phân loại / đã phân loại.
+   - **Bài đăng** — bài album (nhiều ảnh) hoặc bài 1 ảnh; duyệt/sửa/bỏ qua/xóa.
+   - **Phân loại** — thêm/sửa loại hàng (Ghế văn phòng, Bàn làm việc, Tủ & kệ…),
+     kèm ghi chú và hashtag riêng cho từng loại.
+   - **Cài đặt** — số bài/ngày, khung giờ, số ảnh mỗi album, dùng lại ảnh sau bao nhiêu ngày,
+     **Tự động phân loại ảnh bằng AI**, đổi mật khẩu, tạm dừng toàn bộ.
+   - **Lịch sử** — log các lần chạy và lỗi.
+5. Vào **Cài đặt** → điền thông tin shop, 2–3 bài mẫu, số bài/ngày → **Lưu cài đặt**.
 
 ---
 
 ## 7. Chạy thử và kiểm tra
 
 1. Tab **Kho ảnh** → **Thêm ảnh** → chọn 2–3 ảnh sản phẩm.
-2. Vào GitHub → **Actions** → **Worker đăng bài** → **Run workflow**
-   - Lần đầu nên tick `dry_run` để xem kế hoạch trên log mà không đăng thật.
-3. Bỏ tick `dry_run`, chạy lại.
-4. Kết quả mong đợi:
-   - Telegram nhận tin tổng kết.
-   - Tab **Hàng đợi** có caption tiếng Việt → bấm **Duyệt**.
-   - Chạy worker lần nữa → Facebook Page có bài **đã lên lịch**.
-5. Kiểm tra trên Facebook: **Page → Công cụ → Bài viết đã lên lịch**.
+   - Ô **phân loại** để mặc định **“🤖 AI tự phân loại”** nếu bạn muốn AI tự gán loại;
+     hoặc chọn tay đúng loại hàng.
+2. Vào GitHub → **Actions** → **Worker đăng bài** → **Run workflow**:
+   - `mode = dry_run`: xem kế hoạch trên log, **không** đăng thật.
+   - `mode = classify`: chỉ nhờ AI phân loại ảnh (không tạo bài).
+   - `mode = full`: chạy thật (tạo caption + lên lịch Facebook).
+3. Kết quả mong đợi:
+   - Telegram nhận tin tổng kết (có dòng “Ảnh AI tự phân loại”).
+   - Tab **Kho ảnh**: ảnh đã có nhãn loại (ví dụ *Ghế văn phòng*).
+   - Tab **Bài đăng**: bài album/1 ảnh có caption tiếng Việt.
+   - Facebook Page có bài **đã lên lịch** đúng khung giờ.
+4. Kiểm tra trên Facebook: **Page → Công cụ → Bài viết đã lên lịch**.
+
+> 🔁 **Ảnh được dùng lại**: sau `reuse_days` ngày (mặc định 14), ảnh đã đăng có thể
+> xuất hiện lại trong bài mới. Bài mới có thể là album nhiều ảnh hoặc 1 ảnh, và
+> caption đổi cách mở đầu để không bị coi là spam.
+
 
 ---
 
@@ -253,7 +274,9 @@ Sau khi sửa, commit và push — Cloudflare Pages sẽ tự deploy lại.
 |---|---|
 | Telegram báo "Token Facebook hết hạn" | Làm lại bước 3.3–3.5, cập nhật secret `FB_PAGE_ACCESS_TOKEN`. |
 | Log báo `(#200) Requires pages_manage_posts` | Bạn chưa cấp quyền cho Page, hoặc token lấy từ tài khoản không phải admin Page. Làm lại bước 3.2–3.3 và **chọn đúng Page**. |
-| Gemini lỗi 429 | Đã chạm giới hạn miễn phí. Giảm `MAX_PHOTOS_PER_RUN`, chờ sang ngày (reset theo giờ Thái Bình Dương). |
+| Gemini lỗi 429 | Đã chạm giới hạn miễn phí (caption + phân loại dùng chung quota). Giảm `Số ảnh AI phân loại mỗi lần chạy`, giảm số bài/ngày, chờ sang ngày (reset theo giờ Thái Bình Dương). |
+| Ảnh mãi ở nhãn “Chờ AI phân loại” | AI chỉ chạy khi worker chạy. Bấm **Actions → Run workflow → mode = classify**. Nếu AI **chưa khớp loại nào**, ảnh được đánh dấu đã thử — hãy chọn loại tay trong **Kho ảnh → bấm ảnh**. |
+| Ảnh bị gán sai loại | Mở **Kho ảnh** → bấm ảnh → chọn lại loại → **Lưu**. Nếu muốn AI thử lại: chọn lại **“🤖 Để AI tự phân loại”**. |
 | Supabase bị "Paused" | Vào dashboard → **Restore project**. Worker chạy hằng ngày nên thường không bị; nếu bị, bấm Restore rồi chạy worker lại. |
 | Không thấy workflow chạy đúng giờ | GitHub cron trễ vài phút là bình thường. Nếu >1 giờ, bật lại workflow (mục 5.5). |
 | App iOS không mở được | Phải mở bằng **Safari**, và link phải là `https://`. Nếu Pages chưa bật, màn hình sẽ 404. |
@@ -267,5 +290,8 @@ Sau khi sửa, commit và push — Cloudflare Pages sẽ tự deploy lại.
 - ✅ `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `FB_PAGE_ACCESS_TOKEN`, `TELEGRAM_BOT_TOKEN`
   chỉ nằm trong **GitHub Secrets**.
 - ✅ PWA chỉ chứa `SUPABASE_URL` + `SUPABASE_ANON_KEY` (công khai được, vì có RLS).
-- ✅ Đã tắt đăng ký công khai trên Supabase.
+- ✅ Đăng ký tài khoản mở nhưng **phải có mã mời**; người chưa kích hoạt mã mời
+  không đọc/ghi được dữ liệu nào (RLS `is_approved_member()`).
+- ✅ Đổi mã mời: Supabase → **Table editor → app_config** (cột `invite_code`).
+- ✅ Đổi mật khẩu: trong app → **Cài đặt → Đổi mật khẩu**.
 - ❌ Không dán token vào chat, ảnh chụp màn hình hay file trong repo.

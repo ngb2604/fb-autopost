@@ -53,6 +53,23 @@ class ModelUnavailable(Exception):
     """Model đang quá tải (503) hoặc không tồn tại (404) — chuyển model khác."""
 
 
+# Model vừa lỗi 503/404 trong tiến trình hiện tại -> tạm bỏ qua để không chờ lại
+# (Gemini hay trả 503 cho model chính vài chục giây mỗi lần gọi).
+_DOWN_MODELS: dict[str, float] = {}
+_MODEL_DOWN_TTL = 600.0
+
+
+def available_models(chain: list[str]) -> list[str]:
+    """Bỏ các model đang bị đánh dấu 'down'; nếu bỏ hết thì vẫn thử lại model đầu."""
+    now = time.monotonic()
+    alive = [m for m in chain if _DOWN_MODELS.get(m, 0.0) <= now]
+    return alive or chain[:1]
+
+
+def mark_model_down(model: str) -> None:
+    _DOWN_MODELS[model] = time.monotonic() + _MODEL_DOWN_TTL
+    log.warning("Tạm bỏ qua model %s trong %.0f phút", model, _MODEL_DOWN_TTL / 60)
+
 
 # ---------------------------------------------------------------------------
 # Ảnh
@@ -227,8 +244,14 @@ def _call_gemini(
     prompt: str,
     images: list[bytes],
     timeout: float = 120.0,
+    schema: dict[str, Any] | None = None,
+    temperature: float = 1.0,
 ) -> str:
-    """Gọi Gemini với 1 hoặc nhiều ảnh, trả về text thô. Ném RateLimited khi 429."""
+    """Gọi Gemini với 1 hoặc nhiều ảnh, trả về text thô. Ném RateLimited khi 429.
+
+    `schema` cho phép tái dùng hàm này cho việc khác (ví dụ phân loại ảnh) mà
+    vẫn giữ responseMimeType=application/json.
+    """
     parts: list[dict[str, Any]] = [{"text": prompt}]
     for img in images:
         parts.append(
@@ -243,9 +266,9 @@ def _call_gemini(
     body = {
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {
-            "temperature": 1.0,
+            "temperature": temperature,
             "responseMimeType": "application/json",
-            "responseSchema": CAPTION_SCHEMA,
+            "responseSchema": schema or CAPTION_SCHEMA,
         },
     }
     url = GEMINI_ENDPOINT.format(model=model)
@@ -315,7 +338,7 @@ def generate_caption(
     )
     hashtag_defaults = list(default_hashtags or []) + list(category_hashtags or [])
 
-    chain = [model] + [m for m in (fallback_models or []) if m and m != model]
+    chain = available_models([model] + [m for m in (fallback_models or []) if m and m != model])
     last_error: Exception | None = None
 
     for candidate in chain:
@@ -331,6 +354,7 @@ def generate_caption(
             except ModelUnavailable as exc:
                 # Không tốn thời gian retry: sang model kế tiếp
                 log.warning("Model %s không dùng được (%s) — thử model khác", candidate, exc)
+                mark_model_down(candidate)
                 last_error = exc
                 break
             except (CaptionError, httpx.HTTPError) as exc:

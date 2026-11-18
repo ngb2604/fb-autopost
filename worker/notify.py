@@ -74,6 +74,7 @@ def summary_message(
     posts_per_day: int,
     coverage: float,
     dry_run: bool,
+    classified: int = 0,
     notes: list[str] | None = None,
 ) -> str:
     icon = "🧪" if dry_run else "🤖"
@@ -86,6 +87,8 @@ def summary_message(
         f"• Lỗi: <b>{failed}</b>",
         f"• Ảnh còn dùng được: <b>{remaining_photos}</b>",
     ]
+    if classified:
+        lines.insert(2, f"• Ảnh AI tự phân loại: <b>{classified}</b>")
     if coverage < 2:
         lines.append(
             f"⚠️ Chỉ còn đủ ảnh cho khoảng <b>{coverage}</b> ngày "

@@ -4,15 +4,17 @@ Mô hình mới: 1 BÀI = 1 NHÓM ẢNH cùng phân loại (album) hoặc 1 ản
 
 Luồng:
 1. Đọc settings; nếu paused -> thoát.
-2. Lấy ảnh đang dùng được (chưa dùng, hoặc đã quá `reuse_days`).
-3. Lập kế hoạch bài: gom ảnh theo phân loại, xoay vòng loại + kiểu đăng.
-4. Với mỗi bài: tạo post + gắn ảnh, gọi Gemini viết caption từ TẤT CẢ ảnh.
-5. Xếp lịch bài `ready`: tính khung giờ trống -> đăng album/ảnh lên Facebook
+2. AI tự phân loại các ảnh chưa có phân loại (Gemini, tối đa `classify_per_run`).
+3. Lấy ảnh đang dùng được (chưa dùng, hoặc đã quá `reuse_days`).
+4. Lập kế hoạch bài: gom ảnh theo phân loại, xoay vòng loại + kiểu đăng.
+5. Với mỗi bài: tạo post + gắn ảnh, gọi Gemini viết caption từ TẤT CẢ ảnh.
+6. Xếp lịch bài `ready`: tính khung giờ trống -> đăng album/ảnh lên Facebook
    (`published=false` + `scheduled_publish_time`) -> `scheduled`.
-6. Đồng bộ bài đã tới giờ -> `posted` (ảnh vẫn dùng lại được sau `reuse_days`).
-7. Gửi Telegram tổng kết + cảnh báo khi sắp hết ảnh.
+7. Đồng bộ bài đã tới giờ -> `posted` (ảnh vẫn dùng lại được sau `reuse_days`).
+8. Gửi Telegram tổng kết + cảnh báo khi sắp hết ảnh.
 
 Chạy thử:  python -m worker.main --dry-run
+Chỉ phân loại ảnh (không tạo bài): python -m worker.main --classify-only
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from typing import Any
 from . import db as database
 from . import notify
 from .caption import CaptionError, RateLimited, generate_caption
+from .classify import MIN_CONFIDENCE, classify_photo
 from .config import Config
 from .env import load_dotenv
 from .facebook import FacebookClient, FacebookError
@@ -38,6 +41,10 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("worker")
+
+# Không log URL request của httpx (chứa ?key=<GEMINI_API_KEY>)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def build_message(caption: str, hashtags: list[str] | None) -> str:
@@ -64,6 +71,114 @@ def recent_captions(db: database.Supabase, limit: int = 5) -> list[str]:
 
 def category_lookup(categories: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(c["id"]): c for c in categories}
+
+
+# ---------------------------------------------------------------------------
+# Bước 1b: AI tự phân loại ảnh chưa có phân loại
+# ---------------------------------------------------------------------------
+
+def auto_classify(
+    db: database.Supabase,
+    cfg: Config,
+    settings: dict[str, Any],
+    categories: list[dict[str, Any]],
+    stats: dict[str, int],
+    notes: list[str],
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Gán phân loại cho ảnh chưa chọn loại, bằng Gemini.
+
+    Mỗi ảnh chỉ được AI thử một lần (đánh dấu `classified_at`), trừ khi gọi
+    Gemini lỗi/429 — khi đó để lần chạy sau thử lại. Giới hạn số ảnh mỗi lần
+    chạy để tiết kiệm quota free tier.
+    """
+    if not bool(settings.get("auto_classify", True)):
+        log.info("Tự phân loại ảnh đang tắt (auto_classify=false).")
+        return
+
+    active = [c for c in categories if c.get("active", True) and c.get("name")]
+    if not active:
+        log.info("Chưa có phân loại nào đang bật — bỏ qua tự phân loại.")
+        return
+
+    per_run = max(1, int(settings.get("classify_per_run", 10) or 10))
+
+    if dry_run:
+        pending = database.count_unclassified_photos(db)
+        if pending:
+            print(
+                f"[DRY-RUN] Có {pending} ảnh chưa phân loại; "
+                f"AI sẽ xử lý tối đa {per_run} ảnh mỗi lần chạy."
+            )
+            stats["classified"] = min(pending, per_run)
+        return
+
+    rows = database.list_unclassified_photos(db, limit=per_run)
+    if not rows:
+        log.info("Không có ảnh nào cần AI phân loại.")
+        return
+
+    log.info("AI phân loại %d ảnh (tối đa %d/lần chạy)…", len(rows), per_run)
+    unmatched = 0
+
+    for row in rows:
+        try:
+            raw = db.download("photos", row["storage_path"])
+        except Exception as exc:
+            log.warning("Không tải được ảnh %s để phân loại: %s", short(row["id"]), exc)
+            continue
+
+        try:
+            result = classify_photo(
+                api_key=cfg.gemini_api_key,
+                model=cfg.gemini_model,
+                image_bytes=raw,
+                categories=active,
+                fallback_models=cfg.gemini_fallbacks,
+            )
+        except RateLimited as exc:
+            log.warning("Gemini 429 khi phân loại — để lần chạy sau (%s)", exc)
+            notes.append("⏳ Gemini bị giới hạn tốc độ — tạm dừng phân loại ảnh lần này.")
+            break
+        except CaptionError as exc:
+            log.warning("AI phân loại lỗi — để lần chạy sau: %s", exc)
+            notes.append("⚠️ AI phân loại ảnh bị lỗi — sẽ thử lại lần chạy sau.")
+            break
+
+        match = result.get("category")
+        confidence = float(result.get("confidence") or 0)
+        now = datetime.now(timezone.utc).isoformat()
+
+        if match and confidence >= MIN_CONFIDENCE:
+            database.update_photo(
+                db, row["id"], category_id=match["id"], classified_at=now
+            )
+            stats["classified"] += 1
+            log.info(
+                " Ảnh %s -> %s (tin cậy %.2f)", short(row["id"]), match["name"], confidence
+            )
+            database.log_event(
+                db,
+                "info",
+                f"AI phân loại ảnh vào “{match['name']}” (tin cậy {confidence:.2f})",
+                photo_id=row["id"],
+            )
+        else:
+            # Đánh dấu đã thử để không tốn quota gọi lại ảnh này
+            database.update_photo(db, row["id"], classified_at=now)
+            unmatched += 1
+            log.info(
+                " Ảnh %s: AI chưa khớp loại (tên=%r, tin cậy %.2f)",
+                short(row["id"]),
+                result.get("name"),
+                confidence,
+            )
+
+    if unmatched:
+        notes.append(
+            f"🤖 {unmatched} ảnh AI chưa khớp phân loại nào — vẫn đăng ở nhóm “Chưa phân loại”."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -480,6 +595,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Worker đăng bài Facebook Page")
     parser.add_argument("--dry-run", action="store_true", help="Chỉ in kế hoạch, không gọi Facebook")
     parser.add_argument("--limit", type=int, default=0, help="Giới hạn số bài tạo lần này")
+    parser.add_argument(
+        "--classify-only",
+        action="store_true",
+        help="Chỉ phân loại ảnh bằng AI, không tạo/xếp lịch bài",
+    )
     args = parser.parse_args(argv)
 
     load_dotenv()
@@ -492,6 +612,7 @@ def main(argv: list[str] | None = None) -> int:
     stats = {
         "created_posts": 0,
         "photos_used": 0,
+        "classified": 0,
         "scheduled": 0,
         "posted": 0,
         "failed": 0,
@@ -539,6 +660,22 @@ def main(argv: list[str] | None = None) -> int:
                 f"luân phiên: {settings.get('category_rotation', True)}"
             )
 
+        # Ảnh chưa có phân loại -> nhờ AI gán loại trước khi gom bài
+        auto_classify(db, cfg, settings, categories, stats, notes, dry_run=cfg.dry_run)
+
+        if args.classify_only:
+            log.info("--classify-only: đã phân loại %d ảnh.", stats["classified"])
+            if not cfg.dry_run:
+                database.log_event(
+                    db,
+                    "info",
+                    f"Chỉ phân loại ảnh: {stats['classified']} ảnh",
+                    detail=stats,
+                )
+                database.finish_run_lock(db, run_id, {**stats, "classify_only": True})
+            print(f"Đã phân loại {stats['classified']} ảnh.")
+            return 0
+
         if not cfg.dry_run:
             create_posts(db, cfg, settings, categories, stats, notes, dry_run=False)
         else:
@@ -568,6 +705,7 @@ def main(argv: list[str] | None = None) -> int:
         msg = notify.summary_message(
             created_posts=stats["created_posts"],
             photos_used=stats["photos_used"],
+            classified=stats["classified"],
             scheduled=stats["scheduled"],
             posted=stats["posted"],
             failed=stats["failed"],

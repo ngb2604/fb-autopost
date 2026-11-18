@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="icons/icon-180.png" />
 <link rel="icon" href="icons/icon-192.png" />
-<link rel="stylesheet" href="style.css?v=5" />
+<link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
 
@@ -167,7 +167,18 @@
         <label>
           Số bài tạo mỗi lần chạy
           <input type="number" id="max_posts_per_run" min="1" max="20" step="1" value="6" inputmode="numeric" />
-          <span class="hint">Worker chạy vài lần mỗi ngày; mỗi lần tạo tối đa bao nhiêu bài.</span>
+          <span class="hint">Mỗi lần worker chạy tạo tối đa bao nhiêu bài.</span>
+        </label>
+
+        <label class="switch">
+          <span>Tự động phân loại ảnh bằng AI (Gemini)</span>
+          <input type="checkbox" id="auto_classify" />
+        </label>
+
+        <label>
+          Số ảnh AI phân loại mỗi lần chạy
+          <input type="number" id="classify_per_run" min="1" max="50" step="1" value="10" inputmode="numeric" />
+          <span class="hint">Ảnh chưa chọn loại sẽ được AI gán loại trước khi gom bài. Mỗi ảnh chỉ thử một lần.</span>
         </label>
 
         <label class="switch">
@@ -327,7 +338,7 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"></script>
-<script src="config.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="config.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

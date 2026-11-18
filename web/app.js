@@ -108,6 +108,13 @@ function catName(id) {
   return c ? c.name : "Chưa phân loại";
 }
 
+/** Nhãn phân loại của ảnh: ưu tiên loại đã gán, còn lại là trạng thái AI. */
+function photoCatLabel(photo) {
+  if (photo.category_id) return catName(photo.category_id);
+  if (photo.classified_at) return "Chưa phân loại";
+  return "🤖 Chờ AI phân loại";
+}
+
 /* ------------------------------------------------------------------ */
 /* Nén ảnh trên trình duyệt                                            */
 /* ------------------------------------------------------------------ */
@@ -275,6 +282,8 @@ function fillSettingsForm(s) {
   $("album-out").textContent = s.album_size ?? 4;
   $("reuse_days").value = s.reuse_days ?? 14;
   $("max_posts_per_run").value = s.max_posts_per_run ?? 6;
+  $("auto_classify").checked = s.auto_classify !== false;
+  $("classify_per_run").value = s.classify_per_run ?? 10;
   $("category_rotation").checked = s.category_rotation !== false;
   const styles = s.post_styles || ["album", "single"];
   $("style_rotation").checked = styles.includes("single");
@@ -296,6 +305,8 @@ async function saveSettings(event) {
     album_size: Math.max(1, Math.min(10, +$("album_size").value || 4)),
     reuse_days: Math.max(0, Math.min(365, +$("reuse_days").value || 0)),
     max_posts_per_run: Math.max(1, Math.min(20, +$("max_posts_per_run").value || 6)),
+    auto_classify: $("auto_classify").checked,
+    classify_per_run: Math.max(1, Math.min(50, +$("classify_per_run").value || 10)),
     category_rotation: $("category_rotation").checked,
     post_styles: $("style_rotation").checked ? ["album", "single"] : ["album"],
     tone: $("tone").value.trim(),
@@ -347,7 +358,7 @@ async function loadCategories() {
 }
 
 function fillCategorySelects() {
-  const opts = ['<option value="">— Chưa phân loại —</option>']
+  const opts = ['<option value="">🤖 AI tự phân loại (mặc định)</option>']
     .concat(
       state.categories
         .filter((c) => c.active)
@@ -356,7 +367,7 @@ function fillCategorySelects() {
     .join("");
   const upload = $("upload-category");
   const keep = upload.value;
-  upload.innerHTML = opts || '<option value="">— Chưa phân loại —</option>';
+  upload.innerHTML = opts;
   if ([...upload.options].some((o) => o.value === keep)) upload.value = keep;
 
   const box = $("category-filters");
@@ -569,10 +580,15 @@ async function uploadPhotos(files) {
   state.uploading = false;
   $("upload-progress").hidden = true;
   $("upload-status").textContent = "";
+  const autoNote =
+    !categoryId && state.settings?.auto_classify !== false
+      ? " · AI sẽ tự phân loại ở lần chạy tới"
+      : "";
   toast(
     `Đã thêm ${added} ảnh` +
       (skipped ? `, bỏ qua ${skipped} ảnh trùng` : "") +
-      (failed ? `, ${failed} ảnh lỗi` : "")
+      (failed ? `, ${failed} ảnh lỗi` : "") +
+      autoNote
   );
   await loadPhotos();
   renderLibrary();
@@ -658,7 +674,7 @@ async function renderLibrary() {
     card.innerHTML = `
       ${urls[i] ? `<img src="${urls[i]}" alt="" loading="lazy" />` : ""}
       <span class="badge ${meta.cls}">${meta.label}</span>
-      <span class="cat-tag">${escapeHtml(catName(photo.category_id))}${photo.use_count > 1 ? " · ×" + photo.use_count : ""}</span>
+      <span class="cat-tag">${escapeHtml(photoCatLabel(photo))}${photo.use_count > 1 ? " · ×" + photo.use_count : ""}</span>
       <button class="del" type="button" aria-label="Xóa">✕</button>`;
     card.querySelector(".del").onclick = (e) => {
       e.stopPropagation();
@@ -687,7 +703,7 @@ function openPhotoDialog(id) {
 
   const select = $("photo-category");
   select.innerHTML =
-    '<option value="">— Chưa phân loại —</option>' +
+    '<option value="">🤖 Để AI tự phân loại</option>' +
     state.categories
       .map(
         (c) =>
@@ -702,9 +718,15 @@ async function savePhotoDialog() {
   const photo = state.photos.find((p) => p.id === state.editingPhotoId);
   if (!photo) return;
   const categoryId = $("photo-category").value || null;
-  const { error } = await sb.from("photos").update({ category_id: categoryId }).eq("id", photo.id);
+  // Bỏ chọn loại -> để AI thử lại ở lần chạy worker sau
+  const classifiedAt = categoryId ? new Date().toISOString() : null;
+  const { error } = await sb
+    .from("photos")
+    .update({ category_id: categoryId, classified_at: classifiedAt })
+    .eq("id", photo.id);
   if (error) return toast("Lỗi lưu: " + error.message);
   photo.category_id = categoryId;
+  photo.classified_at = classifiedAt;
   $("photo-dialog").close();
   renderLibrary();
   renderCategories();
