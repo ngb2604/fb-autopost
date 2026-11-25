@@ -220,6 +220,11 @@ File `web/config.js` phải có URL và anon key của bạn (xem `README.md`).
 Sau khi sửa, commit và push — Cloudflare Pages sẽ tự deploy lại.
 (Khi sửa CSS/JS, nhớ tăng `?v=` trong `web/index.html` để iPhone không dùng bản cache cũ.)
 
+> 🖼️ **Đổi logo**: thay file `web/icons/logo-source.jpg` bằng ảnh logo mới, chạy
+> `python scripts/make_logo_icons.py` rồi commit + push. Trên iPhone, xoá app khỏi
+> Màn hình chính và **Thêm vào MH chính** lại để iOS cập nhật icon (iOS giữ icon cũ
+> cho tới khi cài lại).
+
 ### 5.5 Bật cron
 - Workflow `worker.yml` chạy **08:00 sáng mỗi ngày** (giờ Việt Nam).
 - GitHub có thể **tự tắt cron** nếu repo không có hoạt động trong 60 ngày.
