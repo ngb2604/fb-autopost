@@ -91,22 +91,44 @@ def prepare_image(raw: bytes, max_edge: int = MAX_EDGE) -> bytes:
 # Prompt
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """Bạn là người viết bài bán hàng cho một Facebook Page tại Việt Nam.
-Nhiệm vụ: nhìn ảnh sản phẩm và viết MỘT bài đăng.
+SYSTEM_PROMPT = """Bạn là nhân viên viết bài bán hàng cho một Facebook Page thanh lý đồ cũ tại Hà Nội.
+Nhiệm vụ: xem (các) ảnh sản phẩm và viết MỘT bài đăng hoàn chỉnh theo đúng bố cục mẫu.
 
-Quy tắc:
+BỐ CỤC BẮT BUỘC — mỗi ý một dòng, dùng ký tự xuống dòng thật:
+🔥 <TÊN NHÓM HÀNG> THANH LÝ <THƯƠNG HIỆU nếu thấy rõ> 🔥
+💥 <một câu hỏi hoặc câu dẫn khiến khách quan tâm>
+✅ <đặc điểm 1>
+✅ <đặc điểm 2>
+✅ <đặc điểm 3>
+✅ <đặc điểm 4>
+💼 Địa chỉ: <địa chỉ shop>
+📍 Zalo/Hotline: <số hotline shop>
+📞 <câu kêu gọi nhắn tin để nhận báo giá / xem thêm ảnh>
+👉 <CÂU KẾT IN HOA – LIÊN HỆ NGAY!>
+
+Quy tắc trình bày:
+- Dùng đúng emoji đầu dòng: 🔥 cho tiêu đề (đầu và cuối dòng), 💥 cho câu mở,
+  ✅ cho các đặc điểm, 💼 cho địa chỉ, 📍 cho hotline, 📞 cho lời mời nhắn tin,
+  👉 cho câu kết.
+- Mỗi dòng là một dòng riêng (có xuống dòng \\n). Không dùng markdown như **,
+  không dùng gạch đầu dòng "-", không đánh số.
+- Có 3–6 dòng ✅, mỗi dòng một ý ngắn gọn.
+- Không để dòng trống giữa các dòng; dòng cuối viết IN HOA.
+
+Quy tắc nội dung:
 - Viết bằng tiếng Việt, giọng: {tone}.
 - Bám sát thông tin shop sau (nếu có): {shop_info}
 - Học giọng văn từ các bài mẫu (không chép nguyên văn): {sample_posts}
 - Phân loại mặt hàng của ảnh này: {category}
 - Ghi chú của shop cho loại hàng này (nếu có): {category_hint}
 - Kiểu bài đăng: {style_hint}
+- Vị trí bài: {part_hint}
 - CHỈ mô tả những gì thực sự nhìn thấy trong ảnh hoặc có trong thông tin shop.
-- TUYỆT ĐỐI KHÔNG bịa giá, kích cỡ, chất liệu, thương hiệu, khuyến mãi, tình trạng hàng
-  nếu không có trong ảnh hoặc thông tin shop. Nếu thiếu, dùng câu mời liên hệ thay vì đoán.
+- TUYỆT ĐỐI KHÔNG bịa giá, kích cỡ, chất liệu, thương hiệu, số lượng, khuyến mãi,
+  tình trạng hàng nếu không có trong ảnh hoặc thông tin shop. Nếu thiếu, dùng câu
+  mời liên hệ thay vì đoán.
 - Không dùng từ ngữ phóng đại vi phạm quy định quảng cáo ("số 1", "cam kết 100%"...).
 - Mỗi bài phải khác cách mở đầu so với các bài gần đây để tránh bị coi là spam.
-- Độ dài: 3-6 dòng, có emoji vừa phải, có lời kêu gọi hành động ở cuối.
 - Thêm 3-6 hashtag liên quan.
 
 Các caption gần đây (KHÔNG được mở đầu giống hoặc lặp lại):
@@ -116,9 +138,9 @@ Các caption gần đây (KHÔNG được mở đầu giống hoặc lặp lại
 
 STYLE_HINTS = {
     "album": (
-        "Album nhiều ảnh của cùng một loại hàng. Viết như một đợt hàng/collection: "
-        "nêu điểm chung của cả lô, mời khách xem hết các ảnh, gợi ý số lượng/độ đa dạng "
-        "nếu thấy rõ trong ảnh."
+        "Một lô nhiều ảnh của cùng một loại hàng. Viết như một đợt hàng: nêu điểm "
+        "chung của cả lô, mời khách xem hết các ảnh; chỉ nêu số lượng khi đếm được "
+        "hoặc thấy rõ trong ảnh."
     ),
     "single": (
         "Bài một ảnh. Tập trung mô tả đúng món đồ trong ảnh, ngắn gọn, dễ đọc."
@@ -135,9 +157,18 @@ def build_prompt(
     category_name: str = "",
     category_hint: str = "",
     style: str = "",
+    part: int = 0,
+    parts: int = 0,
 ) -> str:
     samples = "\n---\n".join(sample_posts or []) or "(chưa có)"
     recent = "\n---\n".join(recent_captions or []) or "(chưa có)"
+    if parts > 1 and part:
+        part_hint = (
+            f"bài {part}/{parts} của cùng một lô ảnh — chỉ tả các món trong ảnh của "
+            "bài này, mở đầu và câu kết phải khác bài trước"
+        )
+    else:
+        part_hint = "một bài duy nhất cho toàn bộ ảnh của loại hàng này"
     return SYSTEM_PROMPT.format(
         tone=tone or "thân thiện, tự nhiên, ngắn gọn",
         shop_info=shop_info or "(chưa có)",
@@ -146,6 +177,7 @@ def build_prompt(
         category=category_name or "(không rõ — tự nhận diện từ ảnh)",
         category_hint=category_hint or "(không có)",
         style_hint=STYLE_HINTS.get(style, STYLE_HINTS["album"]),
+        part_hint=part_hint,
     )
 
 
@@ -201,6 +233,11 @@ def parse_caption_json(text: str, defaults: list[str] | None = None) -> dict[str
     caption = str(data.get("caption") or "").strip()
     if not caption:
         raise CaptionError("Thiếu trường caption")
+    # Chuẩn hoá xuống dòng: mỗi dòng một ý, bỏ dòng trống thừa
+    caption = caption.replace("\r\n", "\n").replace("\r", "\n")
+    caption = "\n".join(
+        line.strip() for line in caption.split("\n") if line.strip()
+    )
 
     try:
         confidence = float(data.get("confidence", 0))
@@ -311,6 +348,8 @@ def generate_caption(
     category_hint: str = "",
     category_hashtags: list[str] | None = None,
     style: str = "album",
+    part: int = 0,
+    parts: int = 0,
     fallback_models: list[str] | None = None,
     max_retries: int = 2,
     retry_wait: float = 8.0,
@@ -335,6 +374,8 @@ def generate_caption(
         category_name=category_name,
         category_hint=category_hint,
         style=style,
+        part=part,
+        parts=parts,
     )
     hashtag_defaults = list(default_hashtags or []) + list(category_hashtags or [])
 

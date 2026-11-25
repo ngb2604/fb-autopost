@@ -1,14 +1,14 @@
-"""Lập kế hoạch bài đăng: gom ảnh theo phân loại thành album hoặc bài 1 ảnh.
+"""Lập kế hoạch bài đăng: gộp TOÀN BỘ ảnh của một phân loại vào 1 bài.
+
+Mô hình mới (thay cho kiểu chia đều `album_size` cũ):
+- Mỗi phân loại có ảnh -> gom hết ảnh của loại đó vào **một bài**.
+- Nếu số ảnh vượt giới hạn an toàn của một bài, chia thành **tối đa 2 bài**
+  (chia đều, ví dụ 11 ảnh -> 6 + 5) và mỗi bài có caption riêng.
+- Ảnh dư (khi một loại có quá nhiều ảnh, vượt 2 bài) để lần chạy sau.
+- Tất cả phân loại đang bật đều được xử lý trong cùng một lượt, dừng khi chạm
+  `max_posts_per_run`.
 
 Toàn bộ file là hàm thuần (không gọi mạng) để test được.
-
-Quy tắc:
-- Ảnh được gom theo phân loại; mỗi loại có một "hàng đợi" riêng.
-- `rotate=True`: các phân loại được xoay vòng (round-robin) để loại nào cũng có bài.
-- `rotate=False`: đăng hết một phân loại rồi mới sang phân loại kế tiếp.
-- Kiểu đăng xoay vòng theo `styles` (ví dụ album -> single -> album ...).
-- Bài album lấy tối đa `album_size` ảnh; nếu chỉ còn 1 ảnh thì thành bài 1 ảnh.
-- Ảnh thuộc phân loại đã tắt sẽ không được đăng.
 """
 
 from __future__ import annotations
@@ -17,6 +17,11 @@ from typing import Any
 
 UNCATEGORIZED = "__uncategorized__"
 STYLES = ("album", "single")
+
+# Facebook nhận nhiều ảnh trong một bài nhưng payload quá lớn dễ lỗi 500,
+# nên giữ một ngưỡng an toàn. Vượt ngưỡng -> chia tối đa 2 bài.
+MAX_PHOTOS_PER_POST = 20
+MAX_POSTS_PER_CATEGORY = 2
 
 
 def _active_categories(categories: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -27,23 +32,35 @@ def _active_categories(categories: list[dict[str, Any]] | None) -> list[dict[str
     )
 
 
+def split_sizes(total: int, parts: int, max_per_post: int) -> list[int]:
+    """Chia `total` ảnh thành `parts` phần gần bằng nhau, mỗi phần ≤ max_per_post.
+
+    Ví dụ: (11, 2, 20) -> [6, 5]; (21, 2, 10) -> [10, 10].
+    """
+    total = max(0, int(total))
+    parts = max(1, int(parts))
+    max_per_post = max(1, int(max_per_post))
+    take = min(total, parts * max_per_post)
+    base, extra = divmod(take, parts)
+    return [base + (1 if i < extra else 0) for i in range(parts)]
+
+
 def plan_posts(
     available: list[dict[str, Any]] | None,
     categories: list[dict[str, Any]] | None,
     *,
-    album_size: int = 4,
-    styles: list[str] | None = None,
-    max_posts: int = 6,
-    rotate: bool = True,
+    max_posts_per_run: int = 6,
+    max_photos_per_post: int = MAX_PHOTOS_PER_POST,
+    max_posts_per_category: int = MAX_POSTS_PER_CATEGORY,
 ) -> list[dict[str, Any]]:
     """Trả về danh sách bài cần tạo.
 
-    Mỗi phần tử: `{category_id, category_name, style, photos: [...]}`.
-    `available` phải đã được sắp theo thứ tự ưu tiên (ảnh lâu chưa dùng trước).
+    Mỗi phần tử: `{category_id, category_name, style, photos, part, parts}`.
+    `available` phải đã sắp theo thứ tự ưu tiên (ảnh lâu chưa dùng trước).
     """
-    album_size = max(1, int(album_size or 1))
-    max_posts = max(1, int(max_posts or 1))
-    style_cycle = [s for s in (styles or ["album"]) if s in STYLES] or ["album"]
+    max_posts_per_run = max(1, int(max_posts_per_run or 1))
+    max_photos_per_post = max(1, int(max_photos_per_post or 1))
+    max_posts_per_category = max(1, int(max_posts_per_category or 1))
 
     buckets: dict[str, list[dict[str, Any]]] = {}
     meta: dict[str, dict[str, Any]] = {}
@@ -65,37 +82,32 @@ def plan_posts(
 
     plans: list[dict[str, Any]] = []
 
-    def take(key: str) -> None:
+    for key in buckets:
         pool = buckets[key]
-        style = style_cycle[len(plans) % len(style_cycle)]
-        if style == "album":
-            take_n = min(album_size, len(pool))
-            if take_n < 2:
-                style, take_n = "single", 1
-        else:
-            take_n = 1
+        if not pool:
+            continue
 
-        photos = pool[:take_n]
-        del pool[:take_n]
-        plans.append({**meta[key], "style": style, "photos": photos})
+        total = len(pool)
+        # 1 bài nếu vừa; nếu không thì chia tối đa `max_posts_per_category` bài
+        parts = 1 if total <= max_photos_per_post else max_posts_per_category
+        parts = min(parts, max_posts_per_category)
+        sizes = split_sizes(total, parts, max_photos_per_post)
 
-    order = list(buckets.keys())
-
-    if rotate:
-        while len(plans) < max_posts:
-            progressed = False
-            for key in order:
-                if len(plans) >= max_posts:
-                    break
-                if buckets[key]:
-                    take(key)
-                    progressed = True
-            if not progressed:
-                break
-    else:
-        for key in order:
-            while buckets[key] and len(plans) < max_posts:
-                take(key)
+        offset = 0
+        for index, size in enumerate(s for s in sizes if s > 0):
+            if len(plans) >= max_posts_per_run:
+                return plans
+            photos = pool[offset : offset + size]
+            offset += size
+            plans.append(
+                {
+                    **meta[key],
+                    "style": "album" if len(photos) > 1 else "single",
+                    "photos": photos,
+                    "part": index + 1,
+                    "parts": sum(1 for s in sizes if s > 0),
+                }
+            )
 
     return plans
 

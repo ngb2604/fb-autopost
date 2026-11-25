@@ -32,7 +32,12 @@ from .classify import MIN_CONFIDENCE, classify_photo
 from .config import Config
 from .env import load_dotenv
 from .facebook import FacebookClient, FacebookError
-from .posts import plan_posts, plan_summary
+from .posts import (
+    MAX_PHOTOS_PER_POST,
+    MAX_POSTS_PER_CATEGORY,
+    plan_posts,
+    plan_summary,
+)
 from .scheduler import build_slots
 
 logging.basicConfig(
@@ -196,10 +201,7 @@ def create_posts(
     dry_run: bool = False,
 ) -> None:
     reuse_days = int(settings.get("reuse_days", 14))
-    album_size = int(settings.get("album_size", 4))
     max_posts = int(settings.get("max_posts_per_run", 6))
-    styles = settings.get("post_styles") or ["album", "single"]
-    rotate = bool(settings.get("category_rotation", True))
     require_approval = bool(settings.get("require_approval", False))
 
     available = database.available_photos(db, reuse_days=reuse_days, limit=300)
@@ -210,10 +212,9 @@ def create_posts(
     plans = plan_posts(
         available,
         categories,
-        album_size=album_size,
-        styles=list(styles),
-        max_posts=max_posts,
-        rotate=rotate,
+        max_posts_per_run=max_posts,
+        max_photos_per_post=MAX_PHOTOS_PER_POST,
+        max_posts_per_category=MAX_POSTS_PER_CATEGORY,
     )
     if not plans:
         log.info("Không lập được bài nào từ %d ảnh.", len(available))
@@ -224,8 +225,9 @@ def create_posts(
     if dry_run:
         print(f"[DRY-RUN] Có {len(available)} ảnh dùng được. Kế hoạch {len(plans)} bài:")
         for p in plans:
+            part = f" (bài {p['part']}/{p['parts']})" if p.get("parts", 1) > 1 else ""
             print(
-                f"  - {p['category_name'] or 'Chưa phân loại'} | {p['style']} | "
+                f"  - {p['category_name'] or 'Chưa phân loại'}{part} | {p['style']} | "
                 f"{len(p['photos'])} ảnh: "
                 + ", ".join(short(ph["id"]) for ph in p["photos"])
             )
@@ -288,6 +290,8 @@ def create_posts(
                 category_hint=cat.get("hint", ""),
                 category_hashtags=cat.get("hashtags") or [],
                 style=plan["style"],
+                part=int(plan.get("part") or 0),
+                parts=int(plan.get("parts") or 0),
             )
         except RateLimited as exc:
             log.warning("Gemini 429 — hoãn tạo bài (%s)", exc)
@@ -655,9 +659,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Model AI: {cfg.gemini_model} | Graph API: {cfg.fb_graph_version}")
             print(
                 f"Cấu hình: {settings.get('posts_per_day')} bài/ngày | "
-                f"{settings.get('album_size', 4)} ảnh/bài | "
+                f"gom toàn bộ ảnh mỗi loại (tối đa 2 bài/loại) | "
                 f"dùng lại sau {settings.get('reuse_days', 14)} ngày | "
-                f"luân phiên: {settings.get('category_rotation', True)}"
+                f"tối đa {settings.get('max_posts_per_run', 6)} bài/lần chạy"
             )
 
         # Ảnh chưa có phân loại -> nhờ AI gán loại trước khi gom bài
@@ -689,12 +693,12 @@ def main(argv: list[str] | None = None) -> int:
             cleanup_storage(db, settings, dry_run=False, stats=stats)
             database.log_event(db, "info", "Worker kết thúc", detail={**stats, "notes": notes})
 
-        # Thống kê ảnh còn dùng được
+        # Thống kê ảnh còn dùng được: mỗi phân loại còn ảnh ~ 1 đợt bài (1-2 bài)
         reuse_days = int(settings.get("reuse_days", 14))
         available = database.available_photos(db, reuse_days=reuse_days, limit=1000)
-        album_size = max(1, int(settings.get("album_size", 4)))
         posts_per_day = max(1, int(settings.get("posts_per_day", 3)))
-        coverage = round(len(available) / album_size / posts_per_day, 1)
+        groups = len({str(p.get("category_id") or "?") for p in available})
+        coverage = round(groups / posts_per_day, 1)
 
         if not cfg.dry_run and not fb_ready and available:
             notes.append(

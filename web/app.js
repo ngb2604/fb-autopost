@@ -278,15 +278,10 @@ function fillSettingsForm(s) {
   $("ppd-out").textContent = s.posts_per_day ?? 3;
   $("time_windows").value = (s.time_windows || []).join(", ");
   $("jitter_minutes").value = s.jitter_minutes ?? 10;
-  $("album_size").value = s.album_size ?? 4;
-  $("album-out").textContent = s.album_size ?? 4;
   $("reuse_days").value = s.reuse_days ?? 14;
   $("max_posts_per_run").value = s.max_posts_per_run ?? 6;
   $("auto_classify").checked = s.auto_classify !== false;
   $("classify_per_run").value = s.classify_per_run ?? 10;
-  $("category_rotation").checked = s.category_rotation !== false;
-  const styles = s.post_styles || ["album", "single"];
-  $("style_rotation").checked = styles.includes("single");
   $("tone").value = s.tone ?? "";
   $("shop_info").value = s.shop_info ?? "";
   $("sample_posts").value = (s.sample_posts || []).join("\n\n");
@@ -302,13 +297,10 @@ async function saveSettings(event) {
     posts_per_day: Math.max(1, Math.min(10, +$("posts_per_day").value || 3)),
     time_windows: parseWindows($("time_windows").value),
     jitter_minutes: Math.max(0, Math.min(60, +$("jitter_minutes").value || 0)),
-    album_size: Math.max(1, Math.min(10, +$("album_size").value || 4)),
     reuse_days: Math.max(0, Math.min(365, +$("reuse_days").value || 0)),
     max_posts_per_run: Math.max(1, Math.min(20, +$("max_posts_per_run").value || 6)),
     auto_classify: $("auto_classify").checked,
     classify_per_run: Math.max(1, Math.min(50, +$("classify_per_run").value || 10)),
-    category_rotation: $("category_rotation").checked,
-    post_styles: $("style_rotation").checked ? ["album", "single"] : ["album"],
     tone: $("tone").value.trim(),
     shop_info: $("shop_info").value.trim(),
     sample_posts: parseList($("sample_posts").value, "\n\n").map((x) => x.trim()),
@@ -1220,9 +1212,6 @@ function bindEvents() {
   $("settings-form").addEventListener("submit", saveSettings);
   $("posts_per_day").addEventListener("input", (e) => {
     $("ppd-out").textContent = e.target.value;
-  });
-  $("album_size").addEventListener("input", (e) => {
-    $("album-out").textContent = e.target.value;
   });
   $("password-form").addEventListener("submit", changePassword);
 

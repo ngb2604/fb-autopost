@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="icons/icon-180.png" />
 <link rel="icon" href="icons/icon-192.png" />
-<link rel="stylesheet" href="style.css?v=6" />
+<link rel="stylesheet" href="style.css?v=7" />
 </head>
 <body>
 
@@ -152,11 +152,11 @@
           <input type="number" id="jitter_minutes" min="0" max="60" step="1" value="10" inputmode="numeric" />
         </label>
 
-        <label>
-          Số ảnh mỗi bài (album): <output id="album-out">4</output>
-          <input type="range" id="album_size" min="1" max="10" step="1" value="4" />
-          <span class="hint">Ví dụ 4: 10 ảnh ghế sẽ thành 2 bài (4 ảnh + 4 ảnh), 2 ảnh còn lại để lần sau.</span>
-        </label>
+        <div class="hint" style="margin: 4px 0 8px">
+          <strong>Cách đăng bài:</strong> mỗi phân loại (ghế, bàn, tủ…) được gom
+          <b>toàn bộ ảnh</b> vào 1 bài để tối ưu. Nếu một loại có quá nhiều ảnh,
+          app tự chia tối đa 2 bài, mỗi bài một caption khác nhau; ảnh dư để lần chạy sau.
+        </div>
 
         <label>
           Dùng lại ảnh sau (ngày)
@@ -165,9 +165,9 @@
         </label>
 
         <label>
-          Số bài tạo mỗi lần chạy
+          Số bài tối đa mỗi lần chạy
           <input type="number" id="max_posts_per_run" min="1" max="20" step="1" value="6" inputmode="numeric" />
-          <span class="hint">Mỗi lần worker chạy tạo tối đa bao nhiêu bài.</span>
+          <span class="hint">Giới hạn an toàn cho một lần worker chạy (mỗi loại tối đa 2 bài).</span>
         </label>
 
         <label class="switch">
@@ -179,16 +179,6 @@
           Số ảnh AI phân loại mỗi lần chạy
           <input type="number" id="classify_per_run" min="1" max="50" step="1" value="10" inputmode="numeric" />
           <span class="hint">Ảnh chưa chọn loại sẽ được AI gán loại trước khi gom bài. Mỗi ảnh chỉ thử một lần.</span>
-        </label>
-
-        <label class="switch">
-          <span>Luân phiên phân loại (mỗi loại đều có bài)</span>
-          <input type="checkbox" id="category_rotation" />
-        </label>
-
-        <label class="switch">
-          <span>Luân phiên bài 1 ảnh và album nhiều ảnh</span>
-          <input type="checkbox" id="style_rotation" />
         </label>
 
         <label>
@@ -338,7 +328,7 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"></script>
-<script src="config.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="config.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

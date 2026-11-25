@@ -235,10 +235,11 @@ Sau khi sửa, commit và push — Cloudflare Pages sẽ tự deploy lại.
 3. Mở app từ Màn hình chính → **đăng nhập** (hoặc **Tạo tài khoản** + nhập mã mời).
 4. App có 5 tab:
    - **Kho ảnh** — thêm ảnh, xem ảnh nào chờ AI phân loại / đã phân loại.
-   - **Bài đăng** — bài album (nhiều ảnh) hoặc bài 1 ảnh; duyệt/sửa/bỏ qua/xóa.
+   - **Bài đăng** — mỗi phân loại được gom **toàn bộ ảnh** vào 1 bài (nếu quá nhiều
+     thì tối đa 2 bài); duyệt/sửa/bỏ qua/xóa.
    - **Phân loại** — thêm/sửa loại hàng (Ghế văn phòng, Bàn làm việc, Tủ & kệ…),
      kèm ghi chú và hashtag riêng cho từng loại.
-   - **Cài đặt** — số bài/ngày, khung giờ, số ảnh mỗi album, dùng lại ảnh sau bao nhiêu ngày,
+   - **Cài đặt** — số bài/ngày, khung giờ, dùng lại ảnh sau bao nhiêu ngày,
      **Tự động phân loại ảnh bằng AI**, đổi mật khẩu, tạm dừng toàn bộ.
    - **Lịch sử** — log các lần chạy và lỗi.
 5. Vào **Cài đặt** → điền thông tin shop, 2–3 bài mẫu, số bài/ngày → **Lưu cài đặt**.
@@ -257,13 +258,20 @@ Sau khi sửa, commit và push — Cloudflare Pages sẽ tự deploy lại.
 3. Kết quả mong đợi:
    - Telegram nhận tin tổng kết (có dòng “Ảnh AI tự phân loại”).
    - Tab **Kho ảnh**: ảnh đã có nhãn loại (ví dụ *Ghế văn phòng*).
-   - Tab **Bài đăng**: bài album/1 ảnh có caption tiếng Việt.
+   - Tab **Bài đăng**: mỗi phân loại là 1 bài gom toàn bộ ảnh (tối đa 2 bài/loại),
+     caption tiếng Việt có emoji, xuống dòng và lời kêu gọi ở cuối.
    - Facebook Page có bài **đã lên lịch** đúng khung giờ.
 4. Kiểm tra trên Facebook: **Page → Công cụ → Bài viết đã lên lịch**.
 
+> 🧩 **Cách gom bài**: mỗi lượt chạy, tất cả ảnh của cùng một phân loại được gom
+> vào **một bài** để tối ưu. Chỉ khi một loại có quá nhiều ảnh, app mới chia thành
+> **tối đa 2 bài**, mỗi bài một caption khác nhau; ảnh dư để lần chạy sau.
+> Caption theo mẫu: `🔥 TÊN HÀNG THANH LÝ 🔥` → `💥` câu mở → các dòng `✅`
+> đặc điểm → `💼` địa chỉ → `📍` Zalo/Hotline → `📞` mời nhắn tin → `👉` câu kết IN HOA.
+
 > 🔁 **Ảnh được dùng lại**: sau `reuse_days` ngày (mặc định 14), ảnh đã đăng có thể
-> xuất hiện lại trong bài mới. Bài mới có thể là album nhiều ảnh hoặc 1 ảnh, và
-> caption đổi cách mở đầu để không bị coi là spam.
+> xuất hiện lại trong bài mới. Bài mới gom theo phân loại và caption đổi cách mở
+> đầu để không bị coi là spam.
 
 
 ---

@@ -107,7 +107,34 @@ def test_prompt_mac_dinh_la_album():
     p = build_prompt(
         tone="", shop_info="", sample_posts=None, recent_captions=None
     )
-    assert "Album nhiều ảnh" in p
+    assert "lô nhiều ảnh" in p
+
+
+def test_prompt_co_bo_cuc_emoji_va_xuong_dong():
+    p = build_prompt(
+        tone="", shop_info="", sample_posts=None, recent_captions=None,
+        category_name="Ghế văn phòng", style="album",
+    )
+    for symbol in ("🔥", "💥", "✅", "💼", "📍", "📞", "👉"):
+        assert symbol in p
+    assert "xuống dòng" in p
+    assert "Địa chỉ" in p and "Hotline" in p
+
+
+def test_prompt_bao_vi_tri_bai_khi_chia_2():
+    p = build_prompt(
+        tone="", shop_info="", sample_posts=None, recent_captions=None,
+        style="album", part=2, parts=2,
+    )
+    assert "bài 2/2" in p
+
+
+def test_caption_duoc_chuan_hoa_xuong_dong():
+    raw = (
+        '{"caption":"Dòng 1\\r\\n\\r\\n  Dòng 2  \\n\\nDòng 3",'
+        '"hashtags":[],"confidence":0.9,"warnings":[],"product_type":""}'
+    )
+    assert parse_caption_json(raw)["caption"] == "Dòng 1\nDòng 2\nDòng 3"
 
 
 def test_prepare_image_resize_va_xoay():
