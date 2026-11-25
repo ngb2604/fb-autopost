@@ -39,7 +39,8 @@ worker/                   Worker Python
   facebook_test.py caption_test.py requirements.txt tests/
 supabase/migrations/0001_init.sql
 docs/SETUP_USER.md        Hướng dẫn từng bước cho chủ shop
-scripts/make_icons.py     Tạo icon PWA
+scripts/make_icons.py     Tạo icon PWA mặc định
+scripts/make_logo_icons.py  Tạo favicon/icon từ web/icons/logo-source.jpg
 .github/workflows/        worker.yml (cron worker)
 ```
 

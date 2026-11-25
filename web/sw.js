@@ -2,17 +2,20 @@
  * Dữ liệu (ảnh, DB) luôn lấy từ mạng — không cache để tránh dữ liệu cũ.
  */
 
-const CACHE = "autopost-shell-v5";
+const CACHE = "autopost-shell-v6";
 const SHELL = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
   "./config.js",
-  "./manifest.json",
-  "./icons/icon-180.png",
-  "./icons/icon-192.png",
-  "./icons/icon-512.png",
+  "./manifest.json?v=2",
+  "./icons/icon-180.png?v=2",
+  "./icons/icon-192.png?v=2",
+  "./icons/icon-512.png?v=2",
+  "./icons/icon-maskable-512.png?v=2",
+  "./icons/favicon.ico?v=2",
+  "./icons/favicon-32.png?v=2",
 ];
 
 self.addEventListener("install", (event) => {
